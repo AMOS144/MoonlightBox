@@ -1,7 +1,42 @@
 [project]
 name = "moonlightbox"
 version = "0.1.0"
-description = "Add your description here"
+description = "基于聊天记录的人格复刻与时间分支探索系统"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "alembic>=1.18.5",
+    "chromadb>=1.5.9",
+    "fastapi>=0.139.2",
+    "httpx>=0.28.1",
+    "pydantic-settings>=2.14.2",
+    "sqlalchemy>=2.0.51",
+    "uvicorn[standard]>=0.51.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.0",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.22",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["backend"]
+testpaths = ["backend/tests"]
+markers = [
+    "model: 需要本地模型或 Apple Silicon 的耗时测试",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["backend/moonlightbox"]
