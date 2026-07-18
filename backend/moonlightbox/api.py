@@ -12,6 +12,7 @@ from moonlightbox.events.router import create_events_router
 from moonlightbox.imports.router import create_imports_router
 from moonlightbox.jobs.router import create_jobs_router
 from moonlightbox.projects.router import create_projects_router
+from moonlightbox.training.router import create_models_router
 
 
 def is_mlx_available() -> bool:
@@ -39,6 +40,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(create_jobs_router(database))
     app.include_router(create_imports_router(resolved_settings.data_dir, database))
     app.include_router(create_events_router(database))
+    app.include_router(create_models_router(database))
 
     @app.get("/api/health")
     def health() -> dict[str, str | bool]:
