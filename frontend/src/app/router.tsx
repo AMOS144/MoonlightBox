@@ -1,5 +1,6 @@
 import { createBrowserRouter } from 'react-router-dom'
 
+import { DataQualityPage } from '../features/data/DataQualityPage'
 import { ProjectCreatePage } from '../features/projects/ProjectCreatePage'
 import { ProjectLayout } from '../features/projects/ProjectLayout'
 import { ProjectListPage } from '../features/projects/ProjectListPage'
@@ -24,6 +25,7 @@ export const router = createBrowserRouter([
               </section>
             ),
           },
+          { path: 'data', element: <DataQualityPage /> },
         ],
       },
     ],

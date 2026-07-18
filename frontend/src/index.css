@@ -183,6 +183,34 @@ h2 {
   padding: 48px;
 }
 
+.import-wizard,
+.preview-panel,
+.quality-notes {
+  display: grid;
+  gap: 16px;
+  max-width: 720px;
+  padding: 28px;
+  border: 1px solid #30273d;
+  border-radius: 18px;
+  background: rgba(24, 18, 32, 0.82);
+}
+
+.preview-panel,
+.quality-notes {
+  margin-top: 20px;
+  background: #100c16;
+}
+
+.import-wizard input,
+.import-wizard select {
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid #41344f;
+  border-radius: 10px;
+  color: #fff;
+  background: #100c16;
+}
+
 @media (max-width: 720px) {
   .page-header {
     flex-direction: column;

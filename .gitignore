@@ -10,15 +10,15 @@ wheels/
 .venv
 
 # 私密聊天与本地运行数据
-wxecho/
-data/
-models/
+/wxecho/
+/data/
+/models/
 .env
 *.log
 
 # 本地开发辅助目录
-.superpowers/
-.worktrees/
+/.superpowers/
+/.worktrees/
 
 # 前端构建产物
 frontend/node_modules/
