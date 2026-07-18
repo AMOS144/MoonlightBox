@@ -15,6 +15,11 @@ dependencies = [
     "uvicorn[standard]>=0.51.0",
 ]
 
+[project.optional-dependencies]
+mlx = [
+    "mlx-lm>=0.31.3",
+]
+
 [dependency-groups]
 dev = [
     "httpx2>=2.7.0",
