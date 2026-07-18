@@ -1,0 +1,23 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      MOONLIGHTBOX_AUTO_CREATE_SCHEMA: "true"
+      MOONLIGHTBOX_DATABASE_URL: sqlite:////app/data/moonlightbox.db
+      MOONLIGHTBOX_DATA_DIR: /app/data
+      MOONLIGHTBOX_CHROMA_DIR: /app/data/chroma
+      MOONLIGHTBOX_MODEL_DIR: /app/models
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"

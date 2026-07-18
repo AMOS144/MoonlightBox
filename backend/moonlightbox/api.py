@@ -44,7 +44,7 @@ def create_app(
         database.close()
 
     app = FastAPI(title="月光宝盒", lifespan=lifespan)
-    app.include_router(create_projects_router(database))
+    app.include_router(create_projects_router(database, resolved_settings))
     app.include_router(create_jobs_router(database))
     app.include_router(create_imports_router(resolved_settings.data_dir, database))
     app.include_router(create_events_router(database))

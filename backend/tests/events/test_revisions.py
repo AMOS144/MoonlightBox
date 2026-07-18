@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 def test_event_edits_create_revision_history(tmp_path: Path) -> None:
     from moonlightbox.events.models import AnalysisRevision, EventNode
     from moonlightbox.events.service import EventService
+    from moonlightbox.projects.models import Project
 
     database = Database(f"sqlite:///{tmp_path / 'events.db'}")
     EventNode.metadata.create_all(database.engine)
@@ -26,6 +27,8 @@ def test_event_edits_create_revision_history(tmp_path: Path) -> None:
     )
 
     with Session(database.engine) as session:
+        session.add(Project(id="project-1", name="修订测试"))
+        session.commit()
         service = EventService(session)
         event = service.create("project-1", reviewed, "analysis-v1", "prompt-v1")
         revised = service.revise(event.id, {"type": "cold_war"}, "人工修改")

@@ -1,0 +1,11 @@
+.git
+.worktrees
+.venv
+data
+models
+wxecho
+frontend/node_modules
+frontend/dist
+**/__pycache__
+*.log
+.env

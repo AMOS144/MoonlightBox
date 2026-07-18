@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 
 def test_registry_marks_only_qualified_model_as_recommended(tmp_path: Path) -> None:
+    from moonlightbox.projects.models import Project
     from moonlightbox.training.models import ModelVersion
     from moonlightbox.training.registry import ModelRegistry
 
@@ -13,6 +14,8 @@ def test_registry_marks_only_qualified_model_as_recommended(tmp_path: Path) -> N
     ModelVersion.metadata.create_all(database.engine)
 
     with Session(database.engine) as session:
+        session.add(Project(id="project-1", name="模型注册测试"))
+        session.commit()
         registry = ModelRegistry(session)
         registry.create(
             project_id="project-1",

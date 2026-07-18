@@ -1,3 +1,6 @@
+import shutil
+from pathlib import Path
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,8 +12,13 @@ class ProjectNotFoundError(LookupError):
 
 
 class ProjectService:
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        artifact_roots: tuple[Path, ...] = (),
+    ) -> None:
         self._session = session
+        self._artifact_roots = artifact_roots
 
     def create(self, name: str) -> Project:
         project = Project(name=name.strip())
@@ -32,3 +40,5 @@ class ProjectService:
         project = self.get(project_id)
         self._session.delete(project)
         self._session.commit()
+        for root in self._artifact_roots:
+            shutil.rmtree(root / "projects" / project_id, ignore_errors=True)

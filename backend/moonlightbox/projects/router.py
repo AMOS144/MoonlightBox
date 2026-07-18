@@ -4,12 +4,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
+from moonlightbox.config import Settings
 from moonlightbox.db import Database
 from moonlightbox.projects.schemas import ProjectCreate, ProjectRead
 from moonlightbox.projects.service import ProjectNotFoundError, ProjectService
 
 
-def create_projects_router(database: Database) -> APIRouter:
+def create_projects_router(database: Database, settings: Settings) -> APIRouter:
     router = APIRouter(prefix="/api/projects", tags=["projects"])
 
     def get_session() -> Iterator[Session]:
@@ -18,7 +19,10 @@ def create_projects_router(database: Database) -> APIRouter:
     SessionDependency = Annotated[Session, Depends(get_session)]
 
     def get_service(session: SessionDependency) -> ProjectService:
-        return ProjectService(session)
+        return ProjectService(
+            session,
+            (settings.data_dir, settings.chroma_dir, settings.model_dir),
+        )
 
     ServiceDependency = Annotated[ProjectService, Depends(get_service)]
 

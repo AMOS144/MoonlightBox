@@ -30,7 +30,7 @@ class EventNode(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     project_id: Mapped[str] = mapped_column(
-        ForeignKey(f"{Project.__tablename__}.id"), index=True
+        ForeignKey(f"{Project.__tablename__}.id", ondelete="CASCADE"), index=True
     )
     type: Mapped[str] = mapped_column(String(64))
     start_message_id: Mapped[str] = mapped_column(String(255))

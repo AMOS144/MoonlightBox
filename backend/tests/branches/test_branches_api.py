@@ -27,11 +27,36 @@ def test_branch_conversation_is_created_generated_and_replayed(tmp_path: Path) -
     )
     with TestClient(create_app(settings, generator=FakeGenerator())) as client:
         project = client.post("/api/projects", json={"name": "时间分支"}).json()
+        event = client.post(
+            f"/api/projects/{project['id']}/events",
+            json={
+                "type": "reconciliation",
+                "start_message_id": "m1",
+                "end_message_id": "m2",
+                "before_state": "疏远",
+                "after_state": "朋友",
+                "emotion_labels": ["期待"],
+                "topic": "重新联系",
+                "conflict_level": 1,
+                "importance": 0.8,
+                "reason": "恢复交流",
+                "evidence_ids": ["m1", "m2"],
+            },
+        ).json()
+        model = client.post(
+            f"/api/projects/{project['id']}/models",
+            json={
+                "base_model": "qwen",
+                "adapter_path": "/models/test",
+                "dataset_hash": "hash",
+                "metrics": {},
+            },
+        ).json()
         created = client.post(
             f"/api/projects/{project['id']}/branches",
             json={
-                "origin_event_id": "event-1",
-                "model_version_id": "model-1",
+                "origin_event_id": event["id"],
+                "model_version_id": model["id"],
                 "title": "如果那天我道歉了",
                 "origin_time": datetime(2026, 2, 1).isoformat(),
                 "state_snapshot": {"relationship_status": "朋友"},
