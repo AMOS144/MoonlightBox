@@ -202,13 +202,82 @@ h2 {
 }
 
 .import-wizard input,
-.import-wizard select {
+.import-wizard select,
+.project-form select,
+.message-form textarea {
   min-height: 42px;
   padding: 8px 12px;
   border: 1px solid #41344f;
   border-radius: 10px;
   color: #fff;
   background: #100c16;
+}
+
+.event-list,
+.branch-grid,
+.model-list {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.event-card,
+.branch-card,
+.model-card,
+.timeline-node {
+  display: grid;
+  gap: 14px;
+  padding: 24px;
+  border: 1px solid #30273d;
+  border-radius: 18px;
+  background: rgba(24, 18, 32, 0.82);
+}
+
+.event-card__header {
+  display: flex;
+  justify-content: space-between;
+  color: #a78bda;
+}
+
+.timeline {
+  display: grid;
+  gap: 24px;
+  padding-left: 24px;
+  border-left: 1px solid #62428f;
+}
+
+.branch-chat {
+  max-width: 760px;
+}
+
+.message-list {
+  display: grid;
+  gap: 12px;
+  min-height: 320px;
+  padding: 24px 0;
+}
+
+.message {
+  width: fit-content;
+  max-width: 80%;
+  padding: 12px 16px;
+  border-radius: 16px;
+  background: #251a32;
+}
+
+.message--user {
+  margin-left: auto;
+  background: #62428f;
+}
+
+.message-form {
+  display: grid;
+  gap: 12px;
+}
+
+.message-form textarea {
+  min-height: 96px;
+  resize: vertical;
 }
 
 @media (max-width: 720px) {
