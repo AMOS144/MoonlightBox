@@ -11,6 +11,7 @@ from moonlightbox.branches.mlx_generation import DatabaseMlxGenerator
 from moonlightbox.branches.router import create_branches_router
 from moonlightbox.config import Settings
 from moonlightbox.db import Database
+from moonlightbox.evaluation.router import create_evaluation_router
 from moonlightbox.events.router import create_events_router
 from moonlightbox.imports.router import create_imports_router
 from moonlightbox.jobs.router import create_jobs_router
@@ -49,6 +50,7 @@ def create_app(
     app.include_router(create_events_router(database))
     app.include_router(create_models_router(database))
     app.include_router(create_branches_router(database, resolved_generator))
+    app.include_router(create_evaluation_router(resolved_settings))
 
     @app.get("/api/health")
     def health() -> dict[str, str | bool]:
