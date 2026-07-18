@@ -22,4 +22,6 @@ def test_upgrade_creates_projects_table(tmp_path: Path) -> None:
         "event_nodes",
         "analysis_revisions",
         "model_versions",
+        "branches",
+        "branch_messages",
     }.issubset(tables)
