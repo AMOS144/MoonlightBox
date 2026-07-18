@@ -15,4 +15,10 @@ def test_upgrade_creates_projects_table(tmp_path: Path) -> None:
     tables = inspect(create_engine(database_url)).get_table_names()
     assert "projects" in tables
     assert "jobs" in tables
-    assert {"import_sources", "participants", "messages"}.issubset(tables)
+    assert {
+        "import_sources",
+        "participants",
+        "messages",
+        "event_nodes",
+        "analysis_revisions",
+    }.issubset(tables)
