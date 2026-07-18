@@ -14,6 +14,7 @@ def settings(tmp_path: Path) -> Settings:
         database_url=f"sqlite:///{tmp_path / 'test.db'}",
         chroma_dir=tmp_path / "chroma",
         model_dir=tmp_path / "models",
+        auto_create_schema=True,
     )
 
 

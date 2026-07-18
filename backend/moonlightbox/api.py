@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from moonlightbox.config import Settings
 from moonlightbox.db import Database
+from moonlightbox.projects.router import create_projects_router
 
 
 def is_mlx_available() -> bool:
@@ -25,10 +26,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         resolved_settings.ensure_directories()
+        if resolved_settings.auto_create_schema:
+            database.create_schema()
         yield
         database.close()
 
     app = FastAPI(title="月光宝盒", lifespan=lifespan)
+    app.include_router(create_projects_router(database))
 
     @app.get("/api/health")
     def health() -> dict[str, str | bool]:

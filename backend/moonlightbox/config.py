@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///data/moonlightbox.db"
     chroma_dir: Path = Path("data/chroma")
     model_dir: Path = Path("models")
+    auto_create_schema: bool = False
 
     def ensure_directories(self) -> None:
         for directory in (self.data_dir, self.chroma_dir, self.model_dir):
