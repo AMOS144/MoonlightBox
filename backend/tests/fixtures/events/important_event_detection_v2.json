@@ -1,0 +1,301 @@
+{
+  "schema_version": "important-event-gold-v1",
+  "precision_gate": 0.8,
+  "cases": [
+    {
+      "case_id": "ordinary-long-gap",
+      "description": "普通聊天相隔多日后自然恢复，不是关系节点。",
+      "messages": [
+        {
+          "source_id": "ordinary-001",
+          "timestamp": "2026-01-01T21:00:00",
+          "sender": "甲",
+          "message_type": "text",
+          "content": "早点休息，晚安"
+        },
+        {
+          "source_id": "ordinary-002",
+          "timestamp": "2026-01-04T09:00:00",
+          "sender": "乙",
+          "message_type": "text",
+          "content": "早呀，今天上班吗"
+        }
+      ],
+      "expected_nodes": [],
+      "excluded_from_display": []
+    },
+    {
+      "case_id": "brief-quarrel",
+      "description": "一次短暂争执很快恢复，不形成持续关系变化。",
+      "messages": [
+        {
+          "source_id": "brief-001",
+          "timestamp": "2026-02-01T20:00:00",
+          "sender": "甲",
+          "message_type": "text",
+          "content": "你怎么又迟到了"
+        },
+        {
+          "source_id": "brief-002",
+          "timestamp": "2026-02-01T20:01:00",
+          "sender": "乙",
+          "message_type": "text",
+          "content": "我真的很生气"
+        },
+        {
+          "source_id": "brief-003",
+          "timestamp": "2026-02-01T20:08:00",
+          "sender": "甲",
+          "message_type": "text",
+          "content": "对不起，路上堵车了"
+        },
+        {
+          "source_id": "brief-004",
+          "timestamp": "2026-02-01T20:10:00",
+          "sender": "乙",
+          "message_type": "text",
+          "content": "好吧，下次提前说"
+        }
+      ],
+      "expected_nodes": [],
+      "excluded_from_display": []
+    },
+    {
+      "case_id": "sustained-conflict",
+      "description": "冲突跨越多个会话且反复出现，应识别为争吵节点。",
+      "messages": [
+        {
+          "source_id": "conflict-001",
+          "timestamp": "2026-03-01T20:00:00",
+          "sender": "甲",
+          "message_type": "text",
+          "content": "这件事我们必须说清楚"
+        },
+        {
+          "source_id": "conflict-002",
+          "timestamp": "2026-03-01T20:03:00",
+          "sender": "乙",
+          "message_type": "text",
+          "content": "你每次都不听我解释"
+        },
+        {
+          "source_id": "conflict-003",
+          "timestamp": "2026-03-02T20:00:00",
+          "sender": "甲",
+          "message_type": "text",
+          "content": "昨天的问题还没有解决"
+        },
+        {
+          "source_id": "conflict-004",
+          "timestamp": "2026-03-02T20:04:00",
+          "sender": "乙",
+          "message_type": "text",
+          "content": "我还是很失望"
+        },
+        {
+          "source_id": "conflict-005",
+          "timestamp": "2026-03-04T21:00:00",
+          "sender": "甲",
+          "message_type": "text",
+          "content": "继续这样我们真的走不下去"
+        }
+      ],
+      "expected_nodes": [
+        {
+          "type": "conflict",
+          "label": "持续争吵",
+          "start_message_id": "conflict-001",
+          "end_message_id": "conflict-005",
+          "evidence_ids": [
+            "conflict-001",
+            "conflict-002",
+            "conflict-003",
+            "conflict-004",
+            "conflict-005"
+          ]
+        }
+      ],
+      "excluded_from_display": []
+    },
+    {
+      "case_id": "growing-alienation",
+      "description": "互动从亲密变得持续冷淡，应识别为疏远节点。",
+      "messages": [
+        {
+          "source_id": "alienation-001",
+          "timestamp": "2026-04-01T08:00:00",
+          "sender": "甲",
+          "message_type": "text",
+          "content": "到公司告诉我呀"
+        },
+        {
+          "source_id": "alienation-002",
+          "timestamp": "2026-04-01T08:05:00",
+          "sender": "乙",
+          "message_type": "text",
+          "content": "好，晚上一起吃饭"
+        },
+        {
+          "source_id": "alienation-003",
+          "timestamp": "2026-04-04T23:00:00",
+          "sender": "甲",
+          "message_type": "text",
+          "content": "最近你都不太愿意聊天了"
+        },
+        {
+          "source_id": "alienation-004",
+          "timestamp": "2026-04-05T12:00:00",
+          "sender": "乙",
+          "message_type": "text",
+          "content": "忙"
+        },
+        {
+          "source_id": "alienation-005",
+          "timestamp": "2026-04-10T22:00:00",
+          "sender": "甲",
+          "message_type": "text",
+          "content": "我们已经很久没好好说话了"
+        },
+        {
+          "source_id": "alienation-006",
+          "timestamp": "2026-04-11T10:00:00",
+          "sender": "乙",
+          "message_type": "text",
+          "content": "嗯"
+        }
+      ],
+      "expected_nodes": [
+        {
+          "type": "distancing",
+          "label": "持续疏远",
+          "start_message_id": "alienation-001",
+          "end_message_id": "alienation-006",
+          "evidence_ids": [
+            "alienation-001",
+            "alienation-002",
+            "alienation-003",
+            "alienation-004",
+            "alienation-005",
+            "alienation-006"
+          ]
+        }
+      ],
+      "excluded_from_display": []
+    },
+    {
+      "case_id": "relationship-upgrade",
+      "description": "双方明确确认恋爱关系，应识别为关系升级节点。",
+      "messages": [
+        {
+          "source_id": "upgrade-001",
+          "timestamp": "2026-05-20T20:00:00",
+          "sender": "甲",
+          "message_type": "text",
+          "content": "我想认真问你，愿意和我在一起吗"
+        },
+        {
+          "source_id": "upgrade-002",
+          "timestamp": "2026-05-20T20:02:00",
+          "sender": "乙",
+          "message_type": "text",
+          "content": "愿意"
+        },
+        {
+          "source_id": "upgrade-003",
+          "timestamp": "2026-05-20T20:04:00",
+          "sender": "甲",
+          "message_type": "text",
+          "content": "那从今天起我们就是恋人了"
+        }
+      ],
+      "expected_nodes": [
+        {
+          "type": "relationship_started",
+          "label": "关系升级",
+          "start_message_id": "upgrade-001",
+          "end_message_id": "upgrade-003",
+          "evidence_ids": [
+            "upgrade-001",
+            "upgrade-002",
+            "upgrade-003"
+          ]
+        }
+      ],
+      "excluded_from_display": []
+    },
+    {
+      "case_id": "reconciliation",
+      "description": "持续矛盾后双方明确道歉并恢复关系，应识别为和解节点。",
+      "messages": [
+        {
+          "source_id": "reconcile-001",
+          "timestamp": "2026-06-01T19:00:00",
+          "sender": "甲",
+          "message_type": "text",
+          "content": "前几天的事情我想了很久"
+        },
+        {
+          "source_id": "reconcile-002",
+          "timestamp": "2026-06-01T19:03:00",
+          "sender": "甲",
+          "message_type": "text",
+          "content": "对不起，我不该那样说你"
+        },
+        {
+          "source_id": "reconcile-003",
+          "timestamp": "2026-06-01T19:05:00",
+          "sender": "乙",
+          "message_type": "text",
+          "content": "我也有不对，我们和好吧"
+        },
+        {
+          "source_id": "reconcile-004",
+          "timestamp": "2026-06-01T19:07:00",
+          "sender": "甲",
+          "message_type": "text",
+          "content": "好，我们重新好好相处"
+        }
+      ],
+      "expected_nodes": [
+        {
+          "type": "reconciliation",
+          "label": "和解",
+          "start_message_id": "reconcile-001",
+          "end_message_id": "reconcile-004",
+          "evidence_ids": [
+            "reconcile-001",
+            "reconcile-002",
+            "reconcile-003",
+            "reconcile-004"
+          ]
+        }
+      ],
+      "excluded_from_display": []
+    },
+    {
+      "case_id": "protocol-noise",
+      "description": "XML 与协议系统消息只是导入噪声，不应成为节点证据或展示内容。",
+      "messages": [
+        {
+          "source_id": "noise-001",
+          "timestamp": "2026-07-01T10:00:00",
+          "sender": "系统",
+          "message_type": "system",
+          "content": "<msg><appmsg appid=\"wx123\"><title>位置共享</title></appmsg></msg>"
+        },
+        {
+          "source_id": "noise-002",
+          "timestamp": "2026-07-02T10:00:00",
+          "sender": "系统",
+          "message_type": "unknown",
+          "content": "wxpay://c2cbizmessagehandler/hongbao/receivehongbao"
+        }
+      ],
+      "expected_nodes": [],
+      "excluded_from_display": [
+        "noise-001",
+        "noise-002"
+      ]
+    }
+  ]
+}

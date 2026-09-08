@@ -46,6 +46,15 @@ def test_confirm_import_is_idempotent(client: TestClient, settings: Settings) ->
         f"/api/projects/{project['id']}/imports/{preview['id']}/confirm",
         json=payload,
     )
+    with source.open("rb") as upload:
+        repeated_preview = client.post(
+            f"/api/projects/{project['id']}/imports/preview",
+            files={"file": ("chat.csv", upload, "text/csv")},
+        ).json()
+    repeated = client.post(
+        f"/api/projects/{project['id']}/imports/{repeated_preview['id']}/confirm",
+        json=payload,
+    )
 
     database = Database(settings.database_url)
     with Session(database.engine) as session:
@@ -53,6 +62,8 @@ def test_confirm_import_is_idempotent(client: TestClient, settings: Settings) ->
 
     assert first.status_code == 201
     assert second.status_code == 200
+    assert repeated.status_code == 200
     assert first.json()["message_count"] == 2
     assert second.json()["import_id"] == first.json()["import_id"]
+    assert repeated.json()["import_id"] == first.json()["import_id"]
     assert message_count == 2

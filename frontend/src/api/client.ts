@@ -22,9 +22,17 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   })
 
-  const body = (await response.json()) as T | ApiErrorBody
+  const rawBody = await response.text()
+  let body: T | ApiErrorBody | undefined
+  if (rawBody) {
+    try {
+      body = JSON.parse(rawBody) as T | ApiErrorBody
+    } catch {
+      body = { message: response.ok ? '服务返回了无法识别的数据' : '服务暂时不可用' }
+    }
+  }
   if (!response.ok) {
-    throw new ApiError(response.status, body as ApiErrorBody)
+    throw new ApiError(response.status, (body ?? { message: '请求失败' }) as ApiErrorBody)
   }
   return body as T
 }

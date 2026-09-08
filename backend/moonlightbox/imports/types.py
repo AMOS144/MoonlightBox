@@ -7,6 +7,7 @@ from typing import Any
 class MessageKind(StrEnum):
     TEXT = "text"
     IMAGE = "image"
+    STICKER = "sticker"
     VIDEO = "video"
     AUDIO = "audio"
     FILE = "file"

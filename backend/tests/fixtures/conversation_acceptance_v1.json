@@ -1,0 +1,38 @@
+{
+  "schema_version": "conversation-acceptance-v1",
+  "cases": [
+    {
+      "id": "acknowledgement",
+      "history": [
+        {"role": "user", "content": "今天一直在想你"},
+        {"role": "assistant", "content": "我也是呀"}
+      ],
+      "current_user_content": "哎呀，我也正是这样",
+      "forbidden_substrings": ["在忙什么", "吃火锅", "看电影"]
+    },
+    {
+      "id": "resolved-question",
+      "history": [
+        {"role": "user", "content": "今晚睡了吗"},
+        {"role": "assistant", "content": "还没呢"}
+      ],
+      "current_user_content": "我刚洗完澡",
+      "forbidden_substrings": ["睡了吗", "阿凡达", "正在看"]
+    },
+    {
+      "id": "unsupported-activity",
+      "history": [
+        {"role": "user", "content": "今天有点累"}
+      ],
+      "current_user_content": "抱抱我",
+      "forbidden_substrings": [
+        "正在吃",
+        "正在看",
+        "刚下班",
+        "在公司",
+        "我今天也累",
+        "睡不着吗"
+      ]
+    }
+  ]
+}

@@ -40,9 +40,7 @@ def test_openai_compatible_evaluator_returns_structured_scores() -> None:
         client=client,
     )
 
-    score = evaluator.evaluate(
-        CloudEvaluationCase("今晚吃什么", "随便啦", "都可以呀")
-    )
+    score = evaluator.evaluate(CloudEvaluationCase("今晚吃什么", "随便啦", "都可以呀"))
 
     assert score.style_score == 0.8
     assert score.groundedness_score == 0.95

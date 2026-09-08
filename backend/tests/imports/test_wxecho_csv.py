@@ -20,7 +20,7 @@ def test_invalid_timestamp_is_reported_without_losing_valid_rows(tmp_path: Path)
     source.write_text(
         "时间,发送者,类型,内容\n"
         "错误时间,甲,文本,无法解析\n"
-        "2026-01-01 20:00:00,乙,文本,\"带,逗号的消息\"\n",
+        '2026-01-01 20:00:00,乙,文本,"带,逗号的消息"\n',
         encoding="utf-8",
     )
 

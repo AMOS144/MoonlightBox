@@ -36,9 +36,17 @@ class WxechoJsonImporter:
         time_text = self._required(item, "time")
         sender = self._required(item, "sender")
         type_name = self._required(item, "type_name")
-        kind = KIND_MAPPING.get(type_name, MessageKind.UNKNOWN)
+        explicit_kind = item.get("kind")
+        try:
+            kind = (
+                MessageKind(explicit_kind)
+                if isinstance(explicit_kind, str)
+                else KIND_MAPPING.get(type_name, MessageKind.UNKNOWN)
+            )
+        except ValueError:
+            kind = MessageKind.UNKNOWN
         content = str(item.get("content") or "")
-        if kind is not MessageKind.TEXT:
+        if explicit_kind is None and kind is not MessageKind.TEXT:
             content = f"[{type_name}]"
 
         return ImportedMessage(

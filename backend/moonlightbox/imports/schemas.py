@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class MessageSample(BaseModel):
@@ -24,6 +24,12 @@ class ImportPreviewRead(BaseModel):
     kind_counts: dict[str, int]
     sample_messages: list[MessageSample]
     errors: list[ImportErrorRead]
+    media_file_count: int = 0
+    linked_sticker_count: int = 0
+    unlinked_sticker_count: int = 0
+    deduplicated_asset_count: int = 0
+    avatar_status: dict[str, bool] = Field(default_factory=dict)
+    failure_reasons: dict[str, int] = Field(default_factory=dict)
 
 
 class ImportConfirm(BaseModel):
@@ -35,3 +41,6 @@ class ImportConfirmRead(BaseModel):
     import_id: str
     message_count: int
     created: bool
+    analysis_job_id: str | None = None
+    world_job_id: str | None = None
+    spatial_job_id: str | None = None

@@ -9,7 +9,7 @@ from moonlightbox.config import Settings
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
-    return Settings(
+    return Settings.model_construct(
         data_dir=tmp_path,
         database_url=f"sqlite:///{tmp_path / 'test.db'}",
         chroma_dir=tmp_path / "chroma",

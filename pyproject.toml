@@ -7,17 +7,31 @@ requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.18.5",
     "chromadb>=1.5.9",
+    "cryptography>=49.0.0",
     "fastapi>=0.139.2",
+    "fastembed>=0.8.0",
     "httpx>=0.28.1",
+    "langchain>=0.3.0",
+    "langgraph>=0.2.0",
     "pydantic-settings>=2.14.2",
     "python-multipart>=0.0.32",
+    "pyyaml>=6.0.3",
+    "regex>=2026.7.10",
     "sqlalchemy>=2.0.51",
     "uvicorn[standard]>=0.51.0",
+    "zstandard>=0.25.0",
 ]
 
 [project.optional-dependencies]
-mlx = [
-    "mlx-lm>=0.31.3",
+linux-ml = [
+    "accelerate>=1.12.0",
+    "bitsandbytes>=0.48.0",
+    "peft>=0.18.0",
+    "pillow>=11.0.0",
+    "safetensors>=0.7.0",
+    # 固定 PyTorch 2.5，避免自动解析到要求 CUDA 13 驱动的新版轮子。
+    "torch==2.5.1",
+    "transformers>=4.57.0",
 ]
 
 [dependency-groups]
@@ -27,14 +41,17 @@ dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "ruff>=0.15.22",
+    "types-pyyaml>=6.0.12.20260518",
+    "types-regex>=2026.7.19.20260720",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["backend"]
 testpaths = ["backend/tests"]
 markers = [
-    "model: 需要本地模型或 Apple Silicon 的耗时测试",
+    "model: 需要本地 Linux 模型或 CUDA GPU 的耗时测试",
 ]
+
 
 [tool.ruff]
 target-version = "py312"

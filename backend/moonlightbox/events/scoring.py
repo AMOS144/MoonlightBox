@@ -27,8 +27,5 @@ def score_change(signals: ChangeSignals) -> float:
         "response_gap_delta": signals.response_gap_delta,
         "persistence": signals.persistence,
     }
-    score = sum(
-        max(0.0, min(1.0, value)) * WEIGHTS[name]
-        for name, value in values.items()
-    )
+    score = sum(max(0.0, min(1.0, value)) * WEIGHTS[name] for name, value in values.items())
     return round(score, 6)

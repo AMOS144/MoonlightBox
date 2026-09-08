@@ -1,0 +1,63 @@
+version: spatial-query-bank-v1
+families:
+  presence_arrival_departure:
+    - 我到了
+    - 刚到这边
+    - 我还在这里
+    - 已经从那边走了
+    - 刚从那里回来
+  home_work_school:
+    - 到家了
+    - 还在公司
+    - 刚下班
+    - 去学校了
+    - 今天在单位
+  commute_transport:
+    - 还在路上
+    - 上地铁了
+    - 正在打车
+    - 路上有点堵
+    - 还有三站
+  outing_consumption:
+    - 去外面吃饭
+    - 正在逛商场
+    - 在咖啡店
+    - 去公园玩
+    - 到店里了
+  meeting_social:
+    - 我们在哪里见
+    - 我去接你
+    - 到你家了
+    - 聚会地点在哪里
+    - 还是上次见面的地方
+  travel_lodging:
+    - 到机场了
+    - 住在这个酒店
+    - 去外地出差
+    - 回上海了
+    - 已经到车站
+  medical_service:
+    - 到医院了
+    - 去复诊
+    - 在银行办事
+    - 办完出来了
+    - 去社区服务中心
+  moving_long_term_change:
+    - 搬到新的地方
+    - 换办公室了
+    - 这是新家
+    - 调到新校区
+    - 新单位在那边
+  relative_deictic:
+    - 我在楼下
+    - 还是老地方
+    - 就在附近
+    - 到这边了
+    - 我已经在那里
+  plan_cancel_route:
+    - 明天去那个地方
+    - 改去别的地方
+    - 今天不去了
+    - 从这里过去
+    - 路线临时改了
+

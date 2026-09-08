@@ -31,9 +31,7 @@ class WxechoTxtImporter:
                     continue
                 match = MESSAGE_PATTERN.match(line.rstrip("\n"))
                 if match is None:
-                    result.errors.append(
-                        ImportError(line_number, "invalid_line", "无法解析消息行")
-                    )
+                    result.errors.append(ImportError(line_number, "invalid_line", "无法解析消息行"))
                     continue
                 content = match.group("content")
                 result.messages.append(

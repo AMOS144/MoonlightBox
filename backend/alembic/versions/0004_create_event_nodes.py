@@ -42,14 +42,10 @@ def upgrade() -> None:
         sa.Column("analysis_version", sa.String(128), nullable=False),
         sa.Column("prompt_version", sa.String(128), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["event_id"], ["event_nodes.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["event_id"], ["event_nodes.id"], ondelete="CASCADE"),
         sa.UniqueConstraint("event_id", "revision_number"),
     )
-    op.create_index(
-        "ix_analysis_revisions_event_id", "analysis_revisions", ["event_id"]
-    )
+    op.create_index("ix_analysis_revisions_event_id", "analysis_revisions", ["event_id"])
 
 
 def downgrade() -> None:

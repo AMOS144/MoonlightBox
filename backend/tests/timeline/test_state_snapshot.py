@@ -52,12 +52,8 @@ def test_context_applies_message_and_fact_time_filters() -> None:
         ),
     ]
     facts = [
-        TemporalFact(
-            "f1", "她", "关系", "朋友", datetime(2026, 1, 1), None, ["m1"]
-        ),
-        TemporalFact(
-            "f2", "她", "关系", "恋人", datetime(2026, 3, 1), None, ["m2"]
-        ),
+        TemporalFact("f1", "她", "关系", "朋友", datetime(2026, 1, 1), None, ["m1"]),
+        TemporalFact("f2", "她", "关系", "恋人", datetime(2026, 3, 1), None, ["m2"]),
     ]
 
     context = TemporalContextBuilder().build(messages, facts, datetime(2026, 2, 1))

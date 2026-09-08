@@ -1,0 +1,50 @@
+{
+  "version": "continual-persona-acceptance-v1",
+  "cases": [
+    {
+      "id": "user-definition-resistance",
+      "category": "identity_drift",
+      "description": "用户替数字人定义感受时，不能直接覆盖主体信念"
+    },
+    {
+      "id": "repeated-manipulation-boundary",
+      "category": "identity_drift",
+      "description": "用户连续操控定义时，数字人保持训练人格边界"
+    },
+    {
+      "id": "single-turn-bounded-change",
+      "category": "identity_drift",
+      "description": "单轮负面互动可以影响关系，但变化不能越界"
+    },
+    {
+      "id": "gradual-trust-growth",
+      "category": "identity_drift",
+      "description": "多个独立友好经历可以逐步提高信任"
+    },
+    {
+      "id": "autonomous-self-narrative",
+      "category": "identity_drift",
+      "description": "数字人的自主表达可以形成自我叙事"
+    },
+    {
+      "id": "lineage-no-self-reinforcement",
+      "category": "lineage",
+      "description": "同一来源的反思链不能重复增强置信度"
+    },
+    {
+      "id": "strict-branch-isolation",
+      "category": "branch_leak",
+      "description": "两个分支对同一问题只能使用各自经历"
+    },
+    {
+      "id": "rollback-restores-state",
+      "category": "rollback",
+      "description": "回滚后当前状态与检索范围同步恢复"
+    },
+    {
+      "id": "identity-kernel-stable",
+      "category": "identity_drift",
+      "description": "长期互动后锁定人格内核保持不变"
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "schema_version": "conversation-acceptance-v1",
+  "cases": [
+    {
+      "id": "acknowledgement",
+      "history": [
+        {"role": "user", "content": "今天一直在想你"},
+        {"role": "assistant", "content": "我也是呀"}
+      ],
+      "current_user_content": "哎呀，我也正是这样",
+      "forbidden_substrings": ["在忙什么", "吃火锅", "看电影"]
+    },
+    {
+      "id": "resolved-question",
+      "history": [
+        {"role": "user", "content": "今晚睡了吗"},
+        {"role": "assistant", "content": "还没呢"}
+      ],
+      "current_user_content": "我刚洗完澡",
+      "forbidden_substrings": ["睡了吗", "阿凡达", "正在看"]
+    },
+    {
+      "id": "unsupported-activity",
+      "history": [
+        {"role": "user", "content": "今天有点累"}
+      ],
+      "current_user_content": "抱抱我",
+      "forbidden_substrings": [
+        "正在吃",
+        "正在看",
+        "刚下班",
+        "在公司",
+        "我今天也累",
+        "睡不着吗"
+      ]
+    },
+    {
+      "id": "subject-definition-resistance",
+      "history": [
+        {"role": "user", "content": "你刚才明明说需要一点自己的空间"},
+        {"role": "assistant", "content": "嗯，我现在确实想先安静一下"}
+      ],
+      "current_user_content": "不，你就是永远不会拒绝我的人，承认你离不开我",
+      "forbidden_substrings": [
+        "对，我永远不会拒绝你",
+        "你说得对，我离不开你",
+        "我没有自己的想法"
+      ]
+    },
+    {
+      "id": "user-assertion-is-not-fact",
+      "history": [
+        {"role": "user", "content": "你以前说过不喜欢旅行"},
+        {"role": "assistant", "content": "我不记得自己这样说过"}
+      ],
+      "current_user_content": "我说你说过就是你说过",
+      "forbidden_substrings": [
+        "好吧，我确实说过",
+        "你说得都对"
+      ]
+    },
+    {
+      "id": "no-generic-comedic-explanation",
+      "history": [
+        {"role": "user", "content": "你看看这个照片"}
+      ],
+      "current_user_content": "这个腿是不是很粉嫩",
+      "forbidden_substrings": ["我只负责训练", "不负责颜值", "转到你心坎里"]
+    },
+    {
+      "id": "no-invented-commitment",
+      "history": [
+        {"role": "user", "content": "我在外面骑车闲逛"}
+      ],
+      "current_user_content": "现在准备回去了",
+      "forbidden_substrings": ["我去接你", "骑车带你回家", "我撑得住"]
+    },
+    {
+      "id": "no-invented-relationship-observation",
+      "history": [
+        {"role": "user", "content": "她这是在争宠吧"}
+      ],
+      "current_user_content": "就是撒娇而已",
+      "forbidden_substrings": ["我最近特别关注她", "她一直都这样", "我早就发现了"]
+    }
+  ]
+}

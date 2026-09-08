@@ -1,29 +1,44 @@
 import { useQuery } from '@tanstack/react-query'
+import { Accordion, Alert, Badge, Card, Group, Progress, SimpleGrid, Skeleton, Stack, Text, Title } from '@mantine/core'
 import { useParams } from 'react-router-dom'
 
 import { request } from '../../api/client'
-import type { ModelVersion } from './types'
+import { SectionNav } from '../../components/SectionNav'
+import { personaNav } from '../../components/sectionNavItems'
+import { modelDisplayName, type ModelVersion } from './types'
 
 export function ModelsPage() {
   const { projectId } = useParams()
   const models = useQuery({
     queryKey: ['models', projectId],
     queryFn: () => request<ModelVersion[]>(`/api/projects/${projectId}/models`),
+    enabled: Boolean(projectId),
+    refetchInterval: (query) =>
+      query.state.data?.length ? false : 2000,
   })
 
   return (
-    <section>
-      <p className="eyebrow">人格模型</p>
-      <h1>保留说话的样子</h1>
-      <div className="model-list">
+    <Stack gap="xl">
+      <SectionNav items={personaNav} label="数字人" />
+      <div><Text c="moon.4" fw={700} size="xs">数字人</Text><Title mt={5} order={1}>版本与质量</Title><Text c="dimmed" mt={7}>查看正在使用的版本，技术参数不会影响日常对话。</Text></div>
+      {models.isLoading ? <SimpleGrid cols={{ base: 1, md: 2 }}><Skeleton h={220} /><Skeleton h={220} /></SimpleGrid> : null}
+      {models.isError ? <Alert color="red" role="alert" title="读取失败">模型状态读取失败，请重试。</Alert> : null}
+      {models.isSuccess && models.data.length === 0 ? (
+        <Alert color="gray" role="status" title="还没有数字人版本">确认重要回忆后会自动开始训练，进度显示在页面顶部。</Alert>
+      ) : null}
+      <SimpleGrid cols={{ base: 1, md: 2 }}>
         {models.data?.map((model) => (
-          <article className="model-card" key={model.id}>
-            <h2>{model.base_model}</h2>
-            <p>{model.recommended ? '当前推荐版本' : model.status}</p>
-            <small>数据集：{model.dataset_hash.slice(0, 12)}</small>
-          </article>
+          <Card key={model.id} padding="lg" withBorder>
+            <Group justify="space-between"><Badge color={model.active ? 'green' : 'gray'} variant="light">{model.active ? '正在使用' : model.status}</Badge>{model.recommended ? <Badge color="moon">推荐</Badge> : null}</Group>
+            <Title mt="lg" order={3}>{modelDisplayName(model)}</Title>
+            <Stack gap="md" mt="lg">
+              <div><Group justify="space-between"><Text size="sm">表达风格</Text><Text fw={700}>{Math.round((model.metrics.style_score ?? 0) * 100)}%</Text></Group><Progress mt={6} value={(model.metrics.style_score ?? 0) * 100} /></div>
+              <div><Group justify="space-between"><Text size="sm">盲测胜率</Text><Text fw={700}>{Math.round((model.metrics.blind_win_rate ?? 0) * 100)}%</Text></Group><Progress color="violet" mt={6} value={(model.metrics.blind_win_rate ?? 0) * 100} /></div>
+            </Stack>
+            <Accordion mt="lg" variant="contained"><Accordion.Item value="technical"><Accordion.Control>技术详情</Accordion.Control><Accordion.Panel><Text size="sm">基础模型：{model.base_model}</Text><Text c="dimmed" size="xs">数据集：{model.dataset_hash.slice(0, 12)}</Text></Accordion.Panel></Accordion.Item></Accordion>
+          </Card>
         ))}
-      </div>
-    </section>
+      </SimpleGrid>
+    </Stack>
   )
 }

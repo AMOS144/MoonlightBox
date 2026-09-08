@@ -59,6 +59,4 @@ class GraphRagRetriever:
 
 
 def _is_valid_at(fact: TemporalFact, cutoff: datetime) -> bool:
-    return fact.valid_from <= cutoff and (
-        fact.valid_to is None or cutoff < fact.valid_to
-    )
+    return fact.valid_from <= cutoff and (fact.valid_to is None or cutoff < fact.valid_to)

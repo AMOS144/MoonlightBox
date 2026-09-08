@@ -42,9 +42,7 @@ def test_json_and_txt_match_csv_messages(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    csv_messages = WxechoCsvImporter().parse(
-        Path("tests/fixtures/wxecho_sample.csv")
-    ).messages
+    csv_messages = WxechoCsvImporter().parse(Path("tests/fixtures/wxecho_sample.csv")).messages
     json_messages = WxechoJsonImporter().parse(json_path).messages
     txt_messages = WxechoTxtImporter().parse(txt_path).messages
 

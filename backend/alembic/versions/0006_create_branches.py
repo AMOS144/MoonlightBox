@@ -39,9 +39,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["branch_id"], ["branches.id"], ondelete="CASCADE"),
         sa.UniqueConstraint("branch_id", "sequence"),
     )
-    op.create_index(
-        "ix_branch_messages_branch_id", "branch_messages", ["branch_id"]
-    )
+    op.create_index("ix_branch_messages_branch_id", "branch_messages", ["branch_id"])
 
 
 def downgrade() -> None:

@@ -1,0 +1,23 @@
+[Unit]
+Description=MoonlightBox LightRAG Sidecar
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=moonlightbox
+Group=moonlightbox
+WorkingDirectory=/opt/moonlightbox/sidecars/lightrag_sidecar
+EnvironmentFile=/etc/moonlightbox/lightrag-sidecar.env
+ExecStart=/opt/moonlightbox/sidecars/lightrag_sidecar/.venv/bin/moonlightbox-lightrag-sidecar
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/moonlightbox-lightrag
+
+[Install]
+WantedBy=multi-user.target
+

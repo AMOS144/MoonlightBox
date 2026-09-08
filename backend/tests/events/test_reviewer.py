@@ -45,8 +45,6 @@ def test_reviewer_rejects_evidence_not_present_in_source() -> None:
 
     candidate = CandidateBoundary(0, 1, 0.8, {}, ["m1", "m2"])
 
-    reviewed = JsonEventReviewer(HallucinatingLlm()).review(
-        candidate, {"m1": "争吵", "m2": "沉默"}
-    )
+    reviewed = JsonEventReviewer(HallucinatingLlm()).review(candidate, {"m1": "争吵", "m2": "沉默"})
 
     assert reviewed is None

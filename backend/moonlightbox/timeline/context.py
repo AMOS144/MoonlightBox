@@ -26,7 +26,6 @@ class TemporalContextBuilder:
         valid_facts = [
             fact
             for fact in facts
-            if fact.valid_from <= cutoff
-            and (fact.valid_to is None or cutoff < fact.valid_to)
+            if fact.valid_from <= cutoff and (fact.valid_to is None or cutoff < fact.valid_to)
         ]
         return TemporalContext(valid_messages, valid_facts, cutoff)

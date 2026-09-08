@@ -26,6 +26,13 @@ def create_jobs_router(database: Database) -> APIRouter:
 
     ServiceDependency = Annotated[JobService, Depends(get_service)]
 
+    @router.get("", response_model=list[JobRead])
+    def list_project_jobs(
+        project_id: str,
+        service: ServiceDependency,
+    ) -> object:
+        return service.list_for_project(project_id)
+
     @router.get("/{job_id}", response_model=JobRead)
     def get_job(job_id: str, service: ServiceDependency) -> object:
         try:

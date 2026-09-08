@@ -1,0 +1,145 @@
+{
+  "schema_version": "important-event-gold-v3",
+  "precision_gate": 0.8,
+  "cases": [
+    {
+      "case_id": "occurred-travel",
+      "description": "到达、体验和回程证明共同旅行已经发生",
+      "messages": [
+        {"source_id": "travel-1", "timestamp": "2026-05-01T10:00:00+08:00", "sender": "甲", "message_type": "text", "content": "我们到杭州酒店了"},
+        {"source_id": "travel-2", "timestamp": "2026-05-01T20:00:00+08:00", "sender": "乙", "message_type": "text", "content": "今天一起逛西湖特别开心"},
+        {"source_id": "travel-3", "timestamp": "2026-05-03T18:00:00+08:00", "sender": "甲", "message_type": "text", "content": "到家了，这次旅行很难忘"}
+      ],
+      "expected_nodes": [
+        {"lane": "shared_experience", "type": "travel", "title": "杭州共同旅行", "event_status": "occurred", "start_message_id": "travel-1", "end_message_id": "travel-3", "evidence_ids": ["travel-1", "travel-2", "travel-3"]}
+      ],
+      "expected_absent_types": [],
+      "excluded_from_display": []
+    },
+    {
+      "case_id": "confirmed-plan",
+      "description": "双方明确确认即将发生的旅行计划",
+      "messages": [
+        {"source_id": "plan-1", "timestamp": "2026-04-20T10:00:00+08:00", "sender": "甲", "message_type": "text", "content": "五一我们去苏州两天好吗"},
+        {"source_id": "plan-2", "timestamp": "2026-04-20T10:02:00+08:00", "sender": "乙", "message_type": "text", "content": "好，1号早上出发，我来订酒店"},
+        {"source_id": "plan-3", "timestamp": "2026-04-20T10:05:00+08:00", "sender": "甲", "message_type": "text", "content": "确认，就按这个安排"}
+      ],
+      "expected_nodes": [
+        {"lane": "shared_experience", "type": "important_plan", "title": "确认五一苏州旅行", "event_status": "confirmed", "start_message_id": "plan-1", "end_message_id": "plan-3", "evidence_ids": ["plan-1", "plan-2", "plan-3"]}
+      ],
+      "expected_absent_types": [],
+      "excluded_from_display": []
+    },
+    {
+      "case_id": "unilateral-proposal",
+      "description": "单方面提议没有得到确认",
+      "messages": [
+        {"source_id": "proposal-1", "timestamp": "2026-04-21T10:00:00+08:00", "sender": "甲", "message_type": "text", "content": "以后有空去云南吧"},
+        {"source_id": "proposal-2", "timestamp": "2026-04-21T10:01:00+08:00", "sender": "乙", "message_type": "text", "content": "以后再说"}
+      ],
+      "expected_nodes": [],
+      "expected_absent_types": ["travel", "important_plan"],
+      "excluded_from_display": []
+    },
+    {
+      "case_id": "cancelled-plan",
+      "description": "已讨论但明确取消的普通出行不作为确认计划",
+      "messages": [
+        {"source_id": "cancel-1", "timestamp": "2026-04-22T10:00:00+08:00", "sender": "甲", "message_type": "text", "content": "周末去郊外吧"},
+        {"source_id": "cancel-2", "timestamp": "2026-04-22T10:01:00+08:00", "sender": "乙", "message_type": "text", "content": "这周都加班，先取消吧"},
+        {"source_id": "cancel-3", "timestamp": "2026-04-22T10:02:00+08:00", "sender": "甲", "message_type": "text", "content": "好，那不去了"}
+      ],
+      "expected_nodes": [],
+      "expected_absent_types": ["outing", "important_plan"],
+      "excluded_from_display": []
+    },
+    {
+      "case_id": "routine-meal",
+      "description": "没有特殊目的或后续影响的普通吃饭",
+      "messages": [
+        {"source_id": "meal-1", "timestamp": "2026-04-23T12:00:00+08:00", "sender": "甲", "message_type": "text", "content": "吃饭了吗"},
+        {"source_id": "meal-2", "timestamp": "2026-04-23T12:01:00+08:00", "sender": "乙", "message_type": "text", "content": "正在吃"}
+      ],
+      "expected_nodes": [],
+      "expected_absent_types": ["date"],
+      "excluded_from_display": []
+    },
+    {
+      "case_id": "special-date",
+      "description": "有明确安排和情绪评价的纪念日约会",
+      "messages": [
+        {"source_id": "date-1", "timestamp": "2026-06-01T18:00:00+08:00", "sender": "甲", "message_type": "text", "content": "今晚纪念日餐厅七点见"},
+        {"source_id": "date-2", "timestamp": "2026-06-01T22:00:00+08:00", "sender": "乙", "message_type": "text", "content": "今晚的约会很开心，谢谢你准备这些"}
+      ],
+      "expected_nodes": [
+        {"lane": "shared_experience", "type": "date", "title": "纪念日约会", "event_status": "occurred", "start_message_id": "date-1", "end_message_id": "date-2", "evidence_ids": ["date-1", "date-2"]}
+      ],
+      "expected_absent_types": [],
+      "excluded_from_display": []
+    },
+    {
+      "case_id": "celebration-gift",
+      "description": "生日庆祝和具有情感意义的礼物属于同一共同经历",
+      "messages": [
+        {"source_id": "birthday-1", "timestamp": "2026-07-01T18:00:00+08:00", "sender": "甲", "message_type": "text", "content": "生日快乐，晚上给你准备了惊喜"},
+        {"source_id": "birthday-2", "timestamp": "2026-07-01T22:00:00+08:00", "sender": "乙", "message_type": "text", "content": "蛋糕和相册我都特别喜欢，这是最开心的生日"}
+      ],
+      "expected_nodes": [
+        {"lane": "shared_experience", "type": "celebration", "title": "生日庆祝", "event_status": "occurred", "start_message_id": "birthday-1", "end_message_id": "birthday-2", "evidence_ids": ["birthday-1", "birthday-2"]}
+      ],
+      "expected_absent_types": [],
+      "excluded_from_display": []
+    },
+    {
+      "case_id": "family-social",
+      "description": "双方回顾第一次见家人",
+      "messages": [
+        {"source_id": "family-1", "timestamp": "2026-08-01T10:00:00+08:00", "sender": "甲", "message_type": "text", "content": "今天一起去见我爸妈"},
+        {"source_id": "family-2", "timestamp": "2026-08-01T20:00:00+08:00", "sender": "乙", "message_type": "text", "content": "叔叔阿姨很亲切，第一次见面很顺利"}
+      ],
+      "expected_nodes": [
+        {"lane": "shared_experience", "type": "family_social", "title": "第一次见家人", "event_status": "occurred", "start_message_id": "family-1", "end_message_id": "family-2", "evidence_ids": ["family-1", "family-2"]}
+      ],
+      "expected_absent_types": [],
+      "excluded_from_display": []
+    },
+    {
+      "case_id": "support-care",
+      "description": "生病期间的明确照顾和事后感谢",
+      "messages": [
+        {"source_id": "care-1", "timestamp": "2026-09-01T09:00:00+08:00", "sender": "乙", "message_type": "text", "content": "我发烧了，一个人在家"},
+        {"source_id": "care-2", "timestamp": "2026-09-01T09:10:00+08:00", "sender": "甲", "message_type": "text", "content": "我带药过去陪你"},
+        {"source_id": "care-3", "timestamp": "2026-09-01T20:00:00+08:00", "sender": "乙", "message_type": "text", "content": "谢谢你今天一直照顾我"}
+      ],
+      "expected_nodes": [
+        {"lane": "shared_experience", "type": "support_care", "title": "生病时照顾陪伴", "event_status": "occurred", "start_message_id": "care-1", "end_message_id": "care-3", "evidence_ids": ["care-1", "care-2", "care-3"]}
+      ],
+      "expected_absent_types": [],
+      "excluded_from_display": []
+    },
+    {
+      "case_id": "relationship-conflict",
+      "description": "明确边界冲突仍由关系通道识别",
+      "messages": [
+        {"source_id": "conflict-1", "timestamp": "2026-10-01T20:00:00+08:00", "sender": "甲", "message_type": "text", "content": "你没有经过我同意就公开我们的事"},
+        {"source_id": "conflict-2", "timestamp": "2026-10-01T20:01:00+08:00", "sender": "乙", "message_type": "text", "content": "我知道你明确说过不可以，是我越界了"}
+      ],
+      "expected_nodes": [
+        {"lane": "relationship", "type": "conflict", "title": "公开关系引发边界冲突", "event_status": "occurred", "start_message_id": "conflict-1", "end_message_id": "conflict-2", "evidence_ids": ["conflict-1", "conflict-2"]}
+      ],
+      "expected_absent_types": [],
+      "excluded_from_display": []
+    },
+    {
+      "case_id": "protocol-noise",
+      "description": "协议消息不能成为节点证据",
+      "messages": [
+        {"source_id": "noise-1", "timestamp": "2026-11-01T10:00:00+08:00", "sender": "系统", "message_type": "system", "content": "<msg><appmsg><url>https://example.test</url></appmsg></msg>"},
+        {"source_id": "noise-2", "timestamp": "2026-11-01T10:01:00+08:00", "sender": "甲", "message_type": "text", "content": "收到"}
+      ],
+      "expected_nodes": [],
+      "expected_absent_types": ["gift", "shared_project"],
+      "excluded_from_display": ["noise-1"]
+    }
+  ]
+}

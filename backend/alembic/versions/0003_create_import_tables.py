@@ -44,12 +44,8 @@ def upgrade() -> None:
         sa.Column("content", sa.String(), nullable=False),
         sa.Column("raw", sa.JSON(), nullable=False),
         sa.ForeignKeyConstraint(["project_id"], ["projects.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(
-            ["import_id"], ["import_sources.id"], ondelete="CASCADE"
-        ),
-        sa.ForeignKeyConstraint(
-            ["participant_id"], ["participants.id"], ondelete="RESTRICT"
-        ),
+        sa.ForeignKeyConstraint(["import_id"], ["import_sources.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["participant_id"], ["participants.id"], ondelete="RESTRICT"),
         sa.UniqueConstraint("import_id", "source_id"),
     )
 

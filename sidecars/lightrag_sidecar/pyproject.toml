@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "moonlightbox-lightrag-sidecar"
+version = "0.1.0"
+description = "Project-isolated LightRAG REST sidecar for MoonlightBox"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.139.2",
+    "httpx>=0.28.1",
+    "lightrag-hku==1.5.6",
+    "openai>=2.0.0,<4.0.0",
+    "pydantic-settings>=2.14.2",
+    "uvicorn[standard]>=0.51.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[project.scripts]
+moonlightbox-lightrag-sidecar = "moonlightbox_lightrag_sidecar.main:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

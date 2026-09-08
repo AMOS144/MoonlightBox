@@ -28,11 +28,41 @@ def test_resume_interrupted_job(client: TestClient, settings: Settings) -> None:
     with Session(database.engine) as session:
         service = JobService(session)
         job = service.enqueue("sample", {})
-        service.start(job.id)
-        interrupted = service.interrupt(job.id, "worker stopped")
+        running = service.start(job.id)
+        assert running.worker_token is not None
+        interrupted = service.interrupt(
+            job.id,
+            "worker stopped",
+            token=running.worker_token,
+        )
+        assert interrupted is not None
         job_id = interrupted.id
 
     resumed = client.post(f"/api/jobs/{job_id}/resume")
 
     assert resumed.status_code == 200
     assert resumed.json()["status"] == "queued"
+
+
+def test_list_project_jobs_restores_persisted_workflow_state(
+    client: TestClient,
+    settings: Settings,
+) -> None:
+    database = Database(settings.database_url)
+    Job.metadata.create_all(database.engine)
+    with Session(database.engine) as session:
+        service = JobService(session)
+        expected = service.enqueue(
+            "digital_human_training_v1",
+            {"project_id": "project-1"},
+        )
+        expected_id = expected.id
+        service.enqueue(
+            "digital_human_training_v1",
+            {"project_id": "project-2"},
+        )
+
+    response = client.get("/api/jobs", params={"project_id": "project-1"})
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()] == [expected_id]

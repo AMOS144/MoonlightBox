@@ -1,5 +1,5 @@
 from collections.abc import Iterator
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -35,8 +35,12 @@ def create_events_router(database: Database) -> APIRouter:
         )
 
     @router.get("", response_model=list[EventNodeRead])
-    def list_events(project_id: str, session: SessionDependency) -> object:
-        return EventService(session).list(project_id)
+    def list_events(
+        project_id: str,
+        session: SessionDependency,
+        lane: Literal["relationship", "shared_experience"] | None = None,
+    ) -> object:
+        return EventService(session).list_read(project_id, lane=lane)
 
     @router.patch("/{event_id}", response_model=EventNodeRead)
     def revise_event(

@@ -1,5 +1,7 @@
 from typing import Protocol
 
+from moonlightbox.branches.replies import GeneratedReplyTurn
+
 
 class BranchGenerator(Protocol):
     def generate(
@@ -7,10 +9,14 @@ class BranchGenerator(Protocol):
         model_version_id: str,
         system_prompt: str,
         messages: list[dict[str, str]],
-    ) -> str: ...
+    ) -> GeneratedReplyTurn: ...
 
 
 class GeneratorUnavailableError(RuntimeError):
+    pass
+
+
+class GenerationFailedError(RuntimeError):
     pass
 
 
@@ -20,6 +26,6 @@ class UnavailableGenerator:
         model_version_id: str,
         system_prompt: str,
         messages: list[dict[str, str]],
-    ) -> str:
+    ) -> GeneratedReplyTurn:
         del model_version_id, system_prompt, messages
         raise GeneratorUnavailableError("本地推理生成器尚未配置")

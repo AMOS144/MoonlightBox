@@ -15,8 +15,15 @@ def test_interrupted_job_can_resume(tmp_path: Path) -> None:
         service = JobService(session)
         job = service.enqueue("sample", {"value": 1})
         running = service.start(job.id)
-        service.checkpoint(running.id, {"offset": 12})
-        interrupted = service.interrupt(running.id, "worker stopped")
+        token = running.worker_token
+        assert token is not None
+        service.checkpoint(running.id, {"offset": 12}, token=token)
+        interrupted = service.interrupt(
+            running.id,
+            "worker stopped",
+            token=token,
+        )
+        assert interrupted is not None
 
         resumed = service.resume(interrupted.id)
 

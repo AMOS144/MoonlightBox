@@ -14,11 +14,15 @@ wheels/
 /data/
 /models/
 .env
+.env.minimax
 *.log
 
 # 本地开发辅助目录
 /.superpowers/
 /.worktrees/
+
+# 对照用的第三方源码，不纳入本仓库提交
+/vendor/
 
 # 前端构建产物
 frontend/node_modules/

@@ -1,23 +1,229 @@
+x-backend-environment: &backend-environment
+  PYTHONPATH: /app/backend
+  MOONLIGHTBOX_AUTO_CREATE_SCHEMA: "false"
+  MOONLIGHTBOX_DATABASE_URL: sqlite:////app/data/moonlightbox.db
+  MOONLIGHTBOX_DATA_DIR: /app/data
+  MOONLIGHTBOX_CHROMA_DIR: /app/data/chroma
+  MOONLIGHTBOX_MODEL_DIR: /app/models
+  MOONLIGHTBOX_LIGHTRAG_ENABLED: ${MOONLIGHTBOX_LIGHTRAG_ENABLED:-true}
+  MOONLIGHTBOX_LIGHTRAG_SIDECAR_URL: http://lightrag-sidecar:9621
+  MOONLIGHTBOX_LIGHTRAG_SIDECAR_TOKEN: ${MOONLIGHTBOX_LIGHTRAG_SIDECAR_TOKEN:-development-only-token}
+  MOONLIGHTBOX_LIGHTRAG_INDEX_REVISION: ${MOONLIGHTBOX_LIGHTRAG_INDEX_REVISION:-person-world-v1}
+  # 默认使用同一 Compose 栈中的 Linux GPU 人格服务，也可替换为独立节点。
+  MOONLIGHTBOX_PERSONA_INFERENCE_URL: ${MOONLIGHTBOX_PERSONA_INFERENCE_URL:-http://persona-runtime:8765}
+  MOONLIGHTBOX_PERSONA_INFERENCE_TOKEN: ${MOONLIGHTBOX_PERSONA_INFERENCE_TOKEN:?设置人格推理服务 token}
+
+x-backend-common: &backend-common
+  image: moonlightbox-backend:local
+  build:
+    context: .
+    dockerfile: Dockerfile
+  working_dir: /app
+  env_file:
+    - path: .env
+      required: false
+    - path: .env.minimax
+      required: false
+  environment: *backend-environment
+  volumes:
+    - ./data:/app/data
+    - ./models:/app/models
+
 services:
-  backend:
+  lightrag-sidecar:
     build:
-      context: .
+      context: ./sidecars/lightrag_sidecar
       dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+      - path: .env.minimax
+        required: false
     environment:
-      MOONLIGHTBOX_AUTO_CREATE_SCHEMA: "true"
-      MOONLIGHTBOX_DATABASE_URL: sqlite:////app/data/moonlightbox.db
-      MOONLIGHTBOX_DATA_DIR: /app/data
-      MOONLIGHTBOX_CHROMA_DIR: /app/data/chroma
-      MOONLIGHTBOX_MODEL_DIR: /app/models
+      LIGHTRAG_SIDECAR_STORAGE_DIR: /var/lib/moonlightbox-lightrag
+      LIGHTRAG_SIDECAR_API_TOKEN: ${MOONLIGHTBOX_LIGHTRAG_SIDECAR_TOKEN:-development-only-token}
+      LIGHTRAG_SIDECAR_HOST: 0.0.0.0
+      LIGHTRAG_SIDECAR_PORT: "9621"
+      LIGHTRAG_SIDECAR_LLM_BASE_URL: ${LIGHTRAG_SIDECAR_LLM_BASE_URL:-https://api.openai.com/v1}
+      LIGHTRAG_SIDECAR_LLM_MODEL: ${LIGHTRAG_SIDECAR_LLM_MODEL:-gpt-4.1-mini}
+      LIGHTRAG_SIDECAR_LLM_REASONING_SPLIT: ${LIGHTRAG_SIDECAR_LLM_REASONING_SPLIT:-false}
+      LIGHTRAG_SIDECAR_LLM_TIMEOUT_SECONDS: ${LIGHTRAG_SIDECAR_LLM_TIMEOUT_SECONDS:-3600}
+      LIGHTRAG_SIDECAR_LLM_MAX_TOKENS: ${LIGHTRAG_SIDECAR_LLM_MAX_TOKENS:-32768}
+      LIGHTRAG_SIDECAR_SUMMARY_CONTEXT_SIZE: ${LIGHTRAG_SIDECAR_SUMMARY_CONTEXT_SIZE:-100000}
+      LIGHTRAG_SIDECAR_SUMMARY_MAX_TOKENS: ${LIGHTRAG_SIDECAR_SUMMARY_MAX_TOKENS:-100000}
+      LIGHTRAG_SIDECAR_FORCE_LLM_SUMMARY_ON_MERGE: ${LIGHTRAG_SIDECAR_FORCE_LLM_SUMMARY_ON_MERGE:-100000}
+      LIGHTRAG_SIDECAR_MAX_PARALLEL_INSERT: ${LIGHTRAG_SIDECAR_MAX_PARALLEL_INSERT:-3}
+      LIGHTRAG_SIDECAR_MAX_ASYNC_LLM: ${LIGHTRAG_SIDECAR_MAX_ASYNC_LLM:-5}
+      LIGHTRAG_SIDECAR_EMBEDDING_BASE_URL: ${LIGHTRAG_SIDECAR_EMBEDDING_BASE_URL:-https://api.openai.com/v1}
+      LIGHTRAG_SIDECAR_EMBEDDING_MODEL: ${LIGHTRAG_SIDECAR_EMBEDDING_MODEL:-text-embedding-3-large}
+      LIGHTRAG_SIDECAR_EMBEDDING_DIMENSION: ${LIGHTRAG_SIDECAR_EMBEDDING_DIMENSION:-3072}
+      LIGHTRAG_SIDECAR_EMBEDDING_MAX_TOKENS: ${LIGHTRAG_SIDECAR_EMBEDDING_MAX_TOKENS:-8191}
+      LIGHTRAG_SIDECAR_EMBEDDING_API_KEY: ${LIGHTRAG_SIDECAR_EMBEDDING_API_KEY:-}
     volumes:
-      - ./data:/app/data
-      - ./models:/app/models
+      - lightrag-data:/var/lib/moonlightbox-lightrag
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json, urllib.request;
+          data = json.load(urllib.request.urlopen(
+          "http://127.0.0.1:9621/health", timeout=3));
+          raise SystemExit(0 if data.get("status") == "ok" else 1)
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  migration:
+    <<: *backend-common
+    entrypoint:
+      - /app/backend/docker-entrypoint.sh
+    command:
+      - /bin/true
+    restart: "no"
+
+  persona-runtime:
+    <<: *backend-common
+    command:
+      - /app/.venv/bin/uvicorn
+      - moonlightbox.persona_runtime:app
+      - --app-dir
+      - backend
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8765"
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+    gpus: all
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - /app/.venv/bin/python
+        - -c
+        - >-
+          import json, urllib.request;
+          data = json.load(urllib.request.urlopen(
+          "http://127.0.0.1:8765/health", timeout=3));
+          raise SystemExit(0 if data.get("status") == "ok" else 1)
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  backend:
+    <<: *backend-common
+    command:
+      - /app/.venv/bin/uvicorn
+      - moonlightbox.api:app
+      - --app-dir
+      - backend
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      persona-runtime:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - /app/.venv/bin/python
+        - -c
+        - >-
+          import json, urllib.request;
+          data = json.load(urllib.request.urlopen(
+          "http://127.0.0.1:8000/api/health", timeout=3));
+          raise SystemExit(0 if data.get("status") == "ok" else 1)
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  realtime-worker:
+    <<: *backend-common
+    environment:
+      <<: *backend-environment
+      MOONLIGHTBOX_WORKER_ROLE: realtime
+    command:
+      - /app/.venv/bin/python
+      - -m
+      - moonlightbox.worker_main
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      persona-runtime:
+        condition: service_healthy
+    restart: unless-stopped
+
+  cognition-worker:
+    <<: *backend-common
+    environment:
+      <<: *backend-environment
+      MOONLIGHTBOX_WORKER_ROLE: cognition
+    command:
+      - /app/.venv/bin/python
+      - -m
+      - moonlightbox.worker_main
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      persona-runtime:
+        condition: service_healthy
+    restart: unless-stopped
+
+  background-worker:
+    <<: *backend-common
+    environment:
+      <<: *backend-environment
+      MOONLIGHTBOX_WORKER_ROLE: background
+    command:
+      - /app/.venv/bin/python
+      - -m
+      - moonlightbox.worker_main
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      persona-runtime:
+        condition: service_healthy
+      lightrag-sidecar:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # QLoRA 训练必须在拥有 CUDA 的独立进程中执行。普通 background-worker
+  # 故意不领取训练任务，避免旧镜像或无 GPU 容器误把任务标记为失败。
+  training-worker:
+    <<: *backend-common
+    environment:
+      <<: *backend-environment
+      MOONLIGHTBOX_WORKER_ROLE: training
+    command:
+      - /app/.venv/bin/python
+      - -m
+      - moonlightbox.worker_main
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+    gpus: all
+    restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "8080:80"
+
+volumes:
+  lightrag-data:
