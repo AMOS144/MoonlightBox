@@ -38,6 +38,7 @@ class PersonaActor:
         packet: ContextPacket,
         intent: str,
         content_points: list[str],
+        speech_mode: str,
         style_tool: BaseTool | None = None,
     ) -> ActorMessage:
         if self.model is None:
@@ -57,6 +58,7 @@ class PersonaActor:
                             {
                                 "communication_intent": intent,
                                 "content_points": content_points,
+                                "speech_mode": speech_mode,
                                 "runtime_context": packet.model_dump(mode="json"),
                             },
                             ensure_ascii=False,

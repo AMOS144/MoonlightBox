@@ -299,6 +299,7 @@ class RuntimeService:
                     packet=packet,
                     intent=decision.communication_intent or "回复用户",
                     content_points=decision.content_points,
+                    speech_mode=decision.speech_mode or "reply",
                     style_tool=StyleService(self.session).tool(
                         branch_id=branch_id,
                         model_version_id=branch.model_version_id,

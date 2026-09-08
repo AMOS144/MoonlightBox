@@ -9,23 +9,49 @@ from langchain_core.tools import StructuredTool
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from moonlightbox.imports.wechat_rendering import normalize_wechat_display
+from moonlightbox.config import Settings
 from moonlightbox.personas.models import IdentityKernel
+from moonlightbox.world.bundles import match_bundle_document_reference
+from moonlightbox.world.client import LightRAGSidecarClient, LightRAGSidecarError
+from moonlightbox.world.models import (
+    ConversationBundle,
+    ConversationBundleMessage,
+    WorldGraphVersion,
+)
 
 from .branch_models import Branch
-from .config import TOOL_DESCRIPTIONS, TOOL_SCHEMAS
+from .config import (
+    STYLE_RETRIEVAL_MAX_CONTEXT_CHARS,
+    STYLE_RETRIEVAL_MAX_SOURCE_IDS,
+    STYLE_RETRIEVAL_QUERY_PROMPT,
+    TOOL_DESCRIPTIONS,
+    TOOL_SCHEMAS,
+)
+from .db_models import RuntimeSnapshotRow
 from .schemas import GetStyleExamplesArgs
-from .source_history import RuntimeSourceHistory
 
 
 class StyleService:
-    """只暴露冻结历史中的真实表达示例，绝不从本轮模型输出反向学习口吻。"""
+    """从最新完整 LightRAG 图谱取回可审计的真人表达证据。
 
-    def __init__(self, session: Session) -> None:
+    这里不再把按时间相邻的 ``self → target`` 消息拼成问答样本。Actor 提供本轮
+    情境，由 LightRAG 从完整图谱检索语义相近的原文；Actor 只从原文观察表达习惯。
+    """
+
+    def __init__(
+        self,
+        session: Session,
+        *,
+        settings: Settings | None = None,
+        lightrag_client: LightRAGSidecarClient | None = None,
+    ) -> None:
         self.session = session
+        self._settings = settings or Settings()
+        # 注入客户端只用于测试或由上层复用连接；由本服务创建的客户端会在查询后关闭。
+        self._lightrag_client = lightrag_client
 
     def tool(self, *, branch_id: str, model_version_id: str) -> StructuredTool:
-        """把身份绑定在代码闭包中，模型只能选择意图和数量。"""
+        """把身份绑定在代码闭包中，模型只能提供当前表达情境。"""
 
         def invoke(**kwargs: Any) -> dict[str, Any]:
             safe_kwargs = {key: value for key, value in kwargs.items() if key != "model_version_id"}
@@ -34,14 +60,7 @@ class StyleService:
             )
             branch = self.session.get(Branch, branch_id)
             if branch is None or branch.model_version_id != model_version_id:
-                return {
-                    "tool_name": "get_style_examples",
-                    "scope": "world",
-                    "as_of": datetime.now(UTC).isoformat(),
-                    "source_ids": [],
-                    "truncated": False,
-                    "data": {"style_profile": {}, "examples": []},
-                }
+                return _empty_style_result()
             kernel = self.session.scalar(
                 select(IdentityKernel).where(IdentityKernel.model_version_id == model_version_id)
             )
@@ -50,14 +69,14 @@ class StyleService:
                 if kernel is not None and isinstance(kernel.content, dict)
                 else {}
             )
-            examples = _authentic_style_examples(self.session, branch, args.intent, args.limit)
+            examples, truncated = self._semantic_examples(branch, args)
             return {
                 "tool_name": "get_style_examples",
                 "model_version_id": model_version_id,
                 "scope": "world",
                 "as_of": datetime.now(UTC).isoformat(),
-                "truncated": False,
                 "source_ids": _example_source_ids(examples),
+                "truncated": truncated,
                 "data": {
                     "style_profile": profile,
                     "examples": examples,
@@ -71,56 +90,131 @@ class StyleService:
             args_schema=cast(Any, TOOL_SCHEMAS["get_style_examples"]),
         )
 
+    def _semantic_examples(
+        self, branch: Branch, args: GetStyleExamplesArgs
+    ) -> tuple[list[dict[str, object]], bool]:
+        """以本轮情境检索图谱，并把 LightRAG 文档来源还原为消息来源。"""
 
-def _authentic_style_examples(
-    session: Session,
-    branch: Branch,
-    intent: str,
-    limit: int,
-) -> list[dict[str, object]]:
-    """从分支冻结边界之前的真人对话选取少量 target 回复示例。"""
+        if not self._settings.lightrag_enabled:
+            return [], False
+        snapshot = self.session.scalar(
+            select(RuntimeSnapshotRow).where(RuntimeSnapshotRow.branch_id == branch.id)
+        )
+        if snapshot is None or snapshot.graph_version_id is None:
+            return [], False
+        graph = self.session.get(WorldGraphVersion, snapshot.graph_version_id)
+        if graph is None or graph.project_id != branch.project_id or graph.status != "ready":
+            return [], False
 
-    rows = RuntimeSourceHistory(session).authentic_example_rows(branch, message_limit=500)
-    groups: list[tuple[str, list[tuple[str, str]]]] = []
-    current_role: str | None = None
-    current: list[tuple[str, str]] = []
-    for message, role in rows:
-        kind, content = normalize_wechat_display(message.kind, message.content)
-        text = " ".join(content.split()).strip()
-        if role not in {"self", "target"} or kind != "text" or not text:
-            continue
-        if role != current_role:
-            if current_role is not None and current:
-                groups.append((current_role, current))
-            current_role, current = role, []
-        current.append((message.id, text))
-    if current_role is not None and current:
-        groups.append((current_role, current))
+        client = self._lightrag_client
+        owns_client = client is None
+        if client is None:
+            client = LightRAGSidecarClient(
+                self._settings.lightrag_sidecar_url,
+                self._settings.lightrag_sidecar_token.get_secret_value(),
+                timeout_seconds=self._settings.lightrag_timeout_seconds,
+            )
+        try:
+            retrieval = client.query(
+                graph.workspace_key,
+                _style_retrieval_query(args),
+                mode="mix",
+                top_k=min(self._settings.lightrag_query_top_k, max(4, args.limit * 3)),
+                chunk_top_k=min(
+                    self._settings.lightrag_query_chunk_top_k, max(2, args.limit * 2)
+                ),
+                max_total_tokens=min(self._settings.lightrag_query_max_total_tokens, 4000),
+            )
+        except LightRAGSidecarError:
+            # 风格证据是可选增强；图谱暂不可用时仍可凭已训练的 style_profile 写作。
+            return [], False
+        finally:
+            if owns_client:
+                client.close()
 
-    query_chars = set(intent.lower())
-    candidates: list[tuple[int, dict[str, object]]] = []
-    for index, (role, target_turn) in enumerate(groups):
-        if role != "target" or index == 0 or groups[index - 1][0] != "self":
-            continue
-        prompt_turn = groups[index - 1][1]
-        target_text = " / ".join(text for _, text in target_turn[:5])
-        prompt_text = " / ".join(text for _, text in prompt_turn[-4:])
-        score = len(query_chars & set((prompt_text + target_text).lower()))
-        candidates.append(
-            (
-                score,
+        document_ids = _referenced_document_ids(self.session, graph.id, retrieval.references)
+        if not document_ids:
+            # 没有可回溯来源的上下文不能交给 Actor，避免把不可审计内容当真人证据。
+            return [], False
+        all_source_ids = _document_message_ids(self.session, document_ids)
+        if not all_source_ids:
+            return [], False
+        source_ids = all_source_ids[:STYLE_RETRIEVAL_MAX_SOURCE_IDS]
+        context = retrieval.context[:STYLE_RETRIEVAL_MAX_CONTEXT_CHARS]
+        return (
+            [
                 {
-                    "source_ids": [
-                        *[message_id for message_id, _ in prompt_turn[-4:]],
-                        *[message_id for message_id, _ in target_turn[:5]],
-                    ],
-                    "prompt": prompt_text,
-                    "text": target_text,
-                },
+                    "selection": "lightrag_semantic_context",
+                    "query_version": "runtime-style-retrieval-v1",
+                    "source_ids": source_ids,
+                    "document_ids": document_ids,
+                    "context": context,
+                }
+            ],
+            (
+                len(retrieval.context) > len(context)
+                or len(all_source_ids) > len(source_ids)
+            ),
+        )
+
+
+def _style_retrieval_query(args: GetStyleExamplesArgs) -> str:
+    """所有风格检索提示词都从 runtime_v1.config 读取，保持模型协议集中。"""
+
+    return STYLE_RETRIEVAL_QUERY_PROMPT.format(
+        situation=args.situation,
+        intent=args.intent,
+        speech_mode=args.speech_mode,
+    )
+
+
+def _referenced_document_ids(
+    session: Session, graph_version_id: str, references: list[Any]
+) -> list[str]:
+    bundles = list(
+        session.scalars(
+            select(ConversationBundle).where(
+                ConversationBundle.graph_version_id == graph_version_id
             )
         )
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    return [item for _, item in candidates[:limit]]
+    )
+    source_to_document = {item.source_name: item.document_id for item in bundles}
+    allowed_sources = set(source_to_document)
+    matched_sources = [
+        match_bundle_document_reference(str(reference.file_path), allowed_sources)
+        for reference in references
+    ]
+    return list(
+        dict.fromkeys(
+            source_to_document[source]
+            for source in matched_sources
+            if source is not None and source in source_to_document
+        )
+    )
+
+
+def _document_message_ids(session: Session, document_ids: list[str]) -> list[str]:
+    if not document_ids:
+        return []
+    return list(
+        session.scalars(
+            select(ConversationBundleMessage.message_id)
+            .join(ConversationBundle, ConversationBundle.id == ConversationBundleMessage.bundle_id)
+            .where(ConversationBundle.document_id.in_(document_ids))
+            .order_by(ConversationBundle.ordinal, ConversationBundleMessage.ordinal)
+        )
+    )
+
+
+def _empty_style_result() -> dict[str, object]:
+    return {
+        "tool_name": "get_style_examples",
+        "scope": "world",
+        "as_of": datetime.now(UTC).isoformat(),
+        "source_ids": [],
+        "truncated": False,
+        "data": {"style_profile": {}, "examples": []},
+    }
 
 
 def _example_source_ids(examples: list[dict[str, object]]) -> list[str]:
@@ -129,4 +223,4 @@ def _example_source_ids(examples: list[dict[str, object]]) -> list[str]:
         raw = item.get("source_ids")
         if isinstance(raw, list):
             source_ids.extend(source_id for source_id in raw if isinstance(source_id, str))
-    return source_ids
+    return list(dict.fromkeys(source_ids))

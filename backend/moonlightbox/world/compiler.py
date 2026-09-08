@@ -1,10 +1,10 @@
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Protocol, TypeVar
 
 from pydantic import BaseModel
 
+from moonlightbox.world.bundles import match_bundle_document_reference
 from moonlightbox.world.client import LightRAGRetrieval, LightRAGSidecarClient
 from moonlightbox.world.schemas import WorldProfileDraft
 
@@ -102,7 +102,9 @@ class BackgroundCompiler:
             document_ids = tuple(dict.fromkeys(
                 source_id
                 for reference in retrieval.references
-                for source_id in (_match_source_id(reference.file_path, allowed_sources),)
+                for source_id in (
+                    match_bundle_document_reference(reference.file_path, allowed_sources),
+                )
                 if source_id is not None
             ))
             referenced_sources.extend(document_ids)
@@ -192,14 +194,3 @@ def _sanitize_sources(
 
     walk(payload)
     return WorldProfileDraft.model_validate(payload)
-
-
-def _match_source_id(file_path: str, allowed_sources: set[str]) -> str | None:
-    """将 Sidecar 返回的路径映射回 Bundle 文档名。"""
-    if file_path in allowed_sources:
-        return file_path
-    basename = Path(file_path.replace("\\", "/")).name
-    if basename in allowed_sources:
-        return basename
-    stem = Path(basename).stem
-    return next((source for source in allowed_sources if Path(source).stem == stem), None)

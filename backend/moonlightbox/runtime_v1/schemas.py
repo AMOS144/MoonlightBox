@@ -263,7 +263,11 @@ class SearchMemoryArgs(StrictModel):
 class GetStyleExamplesArgs(StrictModel):
     # 版本由 StyleService 绑定当前分支；模型没有跨模型读取的能力。
     model_version_id: str | None = Field(default=None, max_length=128)
+    # 由 PersonaActor 根据本轮 runtime_context 组织。它用于 LightRAG 的语义检索，
+    # 不是把相邻历史消息硬拼成「提问—回复」对。
+    situation: str = Field(min_length=8, max_length=1200)
     intent: str = Field(min_length=2, max_length=160)
+    speech_mode: Literal["reply", "proactive", "delayed_reply"]
     limit: int = Field(default=4, ge=1, le=6)
 
 

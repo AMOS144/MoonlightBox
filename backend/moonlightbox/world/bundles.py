@@ -4,6 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,18 @@ class ConversationBundleDocument:
     @property
     def carry_in_message_count(self) -> int:
         return sum(item.is_carry_in for item in self.messages)
+
+
+def match_bundle_document_reference(file_path: str, allowed_sources: set[str]) -> str | None:
+    """将 LightRAG 返回的文件路径映射回已索引的 Bundle 文档名。"""
+
+    if file_path in allowed_sources:
+        return file_path
+    basename = Path(file_path.replace("\\", "/")).name
+    if basename in allowed_sources:
+        return basename
+    stem = Path(basename).stem
+    return next((source for source in allowed_sources if Path(source).stem == stem), None)
 
 
 def source_fingerprint(messages: list[WorldMessage]) -> str:
