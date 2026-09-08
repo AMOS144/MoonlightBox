@@ -5,13 +5,13 @@ from typing import Protocol
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from moonlightbox.branches.continuity_models import IdentityKernel
 from moonlightbox.branches.identity import (
     EvidenceBackedIdentityKernelBuilder,
     IdentityKernelService,
 )
 from moonlightbox.imports.models import ImportSource, Message, Participant
 from moonlightbox.imports.types import ImportedMessage, MessageKind
+from moonlightbox.personas.models import IdentityKernel
 from moonlightbox.training.dataset_builder import DatasetBuilder
 from moonlightbox.training.model_acceptance import AcceptanceReport
 from moonlightbox.training.models import ModelVersion
@@ -48,9 +48,7 @@ class SubjectPersonaModelUpgrader:
         if active is None:
             raise LookupError("项目没有活动模型")
         existing_kernel = self._session.scalar(
-            select(IdentityKernel).where(
-                IdentityKernel.model_version_id == active.id
-            )
+            select(IdentityKernel).where(IdentityKernel.model_version_id == active.id)
         )
         if (
             existing_kernel is not None
@@ -128,9 +126,7 @@ class SubjectPersonaModelUpgrader:
             metrics={
                 **active.metrics,
                 "subject_v2_acceptance_pass_rate": (
-                    report.passed_count / report.case_count
-                    if report.case_count
-                    else 0.0
+                    report.passed_count / report.case_count if report.case_count else 0.0
                 ),
             },
             recommended=True,
@@ -149,11 +145,7 @@ class SubjectPersonaModelUpgrader:
             model_version_id=upgraded.id,
             proposal=proposal,
             evidence_message_ids=list(
-                dict.fromkeys(
-                    source_id
-                    for example in examples
-                    for source_id in example.source_ids
-                )
+                dict.fromkeys(source_id for example in examples for source_id in example.source_ids)
             ),
             acceptance_report_id=report_id,
             commit=False,

@@ -9,11 +9,11 @@ from uuid import uuid4
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from moonlightbox.branches.continuity_models import IdentityKernel
-from moonlightbox.branches.models import Branch, BranchMessage
 from moonlightbox.events.models import EventNode
+from moonlightbox.personas.models import IdentityKernel
 from moonlightbox.world.models import ConversationBundle, PersonWorldProfile, WorldGraphVersion
 
+from .branch_models import Branch, BranchMessage
 from .clock import create_clock
 from .db_models import (
     RuntimeClockRow,
@@ -82,10 +82,9 @@ class RuntimeExecutor:
             self.session.add(snapshot)
             self.session.flush()
             _seed_world_memory(self.session, snapshot)
-        # 旧的连续记忆仅在这里做一次只读投影；Runtime v1 后续只读取自己的
-        # MemoryRecord / MemoryIndexVersion，绝不再创建 pending 审核记忆。
+        # 历史已审核记忆由数据库退役迁移一次性导入。Runtime v1 后续只读取
+        # 自己的 MemoryRecord / MemoryIndexVersion，绝不再依赖旧连续记忆表。
         memory_service = MemoryService(self.session)
-        memory_service.migrate_legacy_branch_items(branch_id)
         memory_service.rebuild_index(branch_id, reason="bootstrap")
         clock_row = self.session.get(RuntimeClockRow, branch_id)
         if clock_row is None:

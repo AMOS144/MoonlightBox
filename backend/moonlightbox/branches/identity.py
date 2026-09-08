@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from moonlightbox.branches.continuity_models import IdentityKernel
+from moonlightbox.personas.models import IdentityKernel
 from moonlightbox.training.bubble_protocol import parse_bubble_protocol
 from moonlightbox.training.dataset_builder import (
     ConfirmedEventContext,
@@ -54,10 +54,7 @@ class EvidenceBackedIdentityKernelBuilder:
         evidence_examples = [
             example
             for example in examples
-            if not any(
-                source_id.startswith("policy:")
-                for source_id in example.source_ids
-            )
+            if not any(source_id.startswith("policy:") for source_id in example.source_ids)
         ]
         style_turns = [
             _assistant_style_turn(example)
@@ -66,9 +63,7 @@ class EvidenceBackedIdentityKernelBuilder:
         ]
         assistant_targets = [
             "\n".join(
-                bubble.text
-                for bubble in turn.bubbles
-                if bubble.kind == "text" and bubble.text
+                bubble.text for bubble in turn.bubbles if bubble.kind == "text" and bubble.text
             )
             for turn in style_turns
         ]
@@ -79,7 +74,9 @@ class EvidenceBackedIdentityKernelBuilder:
         )
         source_ids = list(
             dict.fromkeys(
-                source_id for example in examples for source_id in example.source_ids
+                source_id
+                for example in examples
+                for source_id in example.source_ids
                 if not source_id.startswith("policy:")
             )
         )
@@ -88,8 +85,7 @@ class EvidenceBackedIdentityKernelBuilder:
             for text in assistant_targets
         )
         question_count = sum(
-            text.rstrip().endswith(("吗", "呢", "？", "?"))
-            for text in assistant_targets
+            text.rstrip().endswith(("吗", "呢", "？", "?")) for text in assistant_targets
         )
         style_profile = build_style_profile_from_turns(style_turns)
         behavioral_rhythm = _build_behavioral_rhythm(
@@ -100,23 +96,11 @@ class EvidenceBackedIdentityKernelBuilder:
             evidence_examples
         )
         raw_forbidden_markers = style_profile["forbidden_unobserved_markers"]
-        forbidden_markers = (
-            raw_forbidden_markers
-            if isinstance(raw_forbidden_markers, list)
-            else []
-        )
+        forbidden_markers = raw_forbidden_markers if isinstance(raw_forbidden_markers, list) else []
         language_patterns = [
             f"真实回复平均约 {average_length:.0f} 个字符",
-            (
-                "通常使用短句和紧凑表达"
-                if average_length < 40
-                else "通常使用较完整的连续表达"
-            ),
-            (
-                "会通过自然追问继续交流"
-                if question_count
-                else "较少使用连续追问"
-            ),
+            ("通常使用短句和紧凑表达" if average_length < 40 else "通常使用较完整的连续表达"),
+            ("会通过自然追问继续交流" if question_count else "较少使用连续追问"),
             (
                 "未观察到的语气标记不得擅自使用："
                 + "、".join(str(item) for item in forbidden_markers)
@@ -159,21 +143,13 @@ class EvidenceBackedIdentityKernelBuilder:
             ],
             language_patterns=language_patterns,
             typical_reactions=[
-                (
-                    "面对不愿接受的要求会直接拒绝"
-                    if refusal_count
-                    else "面对冲突时保留自己的判断"
-                ),
+                ("面对不愿接受的要求会直接拒绝" if refusal_count else "面对冲突时保留自己的判断"),
                 "证据不足时自然澄清",
             ],
             style_profile=style_profile,
             behavioral_rhythm=behavioral_rhythm,
             field_evidence={
-                name: (
-                    preference_evidence
-                    if name == "expressed_preferences"
-                    else source_ids
-                )
+                name: (preference_evidence if name == "expressed_preferences" else source_ids)
                 for name in field_names
             },
             field_confidence={
@@ -244,9 +220,7 @@ class IdentityKernelService:
             project_id=project_id,
             model_version_id=model_version_id,
             schema_version=(
-                "subject-persona-v2"
-                if acceptance_report_id is not None
-                else "subject-centric-v1"
+                "subject-persona-v2" if acceptance_report_id is not None else "subject-centric-v1"
             ),
             content=content,
             evidence_message_ids=evidence,
@@ -319,9 +293,7 @@ def _build_behavioral_rhythm(
             covered += hour_counts[hour]
             if covered / sample_count >= 0.7 or len(active_hours) == 8:
                 break
-    proactive_count = sum(
-        example.conversation_mode == "proactive" for example in eligible
-    )
+    proactive_count = sum(example.conversation_mode == "proactive" for example in eligible)
     inter_bubble_delays = sorted(
         bubble.delay_ms
         for example in eligible
@@ -329,15 +301,9 @@ def _build_behavioral_rhythm(
         if bubble.delay_ms > 0
     )
     delay_count = len(inter_bubble_delays)
-    delay_p50 = (
-        inter_bubble_delays[max(0, (delay_count - 1) // 2)]
-        if inter_bubble_delays
-        else 0
-    )
+    delay_p50 = inter_bubble_delays[max(0, (delay_count - 1) // 2)] if inter_bubble_delays else 0
     delay_p90 = (
-        inter_bubble_delays[
-            min(delay_count - 1, max(0, round(delay_count * 0.9) - 1))
-        ]
+        inter_bubble_delays[min(delay_count - 1, max(0, round(delay_count * 0.9) - 1))]
         if inter_bubble_delays
         else 0
     )
@@ -346,9 +312,7 @@ def _build_behavioral_rhythm(
         "sample_count": sample_count,
         "confidence": round(min(1.0, sample_count / 100), 4),
         "timezone_offset_minutes": (
-            Counter(offsets).most_common(1)[0][0]
-            if offsets
-            else default_timezone_offset_minutes
+            Counter(offsets).most_common(1)[0][0] if offsets else default_timezone_offset_minutes
         ),
         "timezone_derivation": (
             "authentic_timestamp_offset"
@@ -356,9 +320,7 @@ def _build_behavioral_rhythm(
             else "configured_default_for_naive_source_timestamps"
         ),
         "hour_counts": {str(hour): hour_counts.get(hour, 0) for hour in range(24)},
-        "weekday_counts": {
-            str(weekday): weekday_counts.get(weekday, 0) for weekday in range(7)
-        },
+        "weekday_counts": {str(weekday): weekday_counts.get(weekday, 0) for weekday in range(7)},
         "active_hours": sorted(active_hours),
         "proactive_turn_count": proactive_count,
         "proactive_turn_rate": round(
@@ -367,11 +329,7 @@ def _build_behavioral_rhythm(
         ),
         "inter_bubble_delay_ms": {
             "count": delay_count,
-            "mean": (
-                round(sum(inter_bubble_delays) / delay_count, 2)
-                if delay_count
-                else 0.0
-            ),
+            "mean": (round(sum(inter_bubble_delays) / delay_count, 2) if delay_count else 0.0),
             "p50": delay_p50,
             "p90": delay_p90,
         },
@@ -419,9 +377,7 @@ def _assistant_text(content: str) -> str:
         except ValueError:
             return ""
         return "\n".join(
-            bubble.value
-            for bubble in protocol_bubbles
-            if bubble.kind == "text" and bubble.value
+            bubble.value for bubble in protocol_bubbles if bubble.kind == "text" and bubble.value
         )
     try:
         parsed = json.loads(content)
@@ -440,11 +396,7 @@ def _assistant_text(content: str) -> str:
 def _assistant_style_turn(example: TrainingExample) -> StyleTurn:
     content = example.messages[-1].content
     previous_text = next(
-        (
-            message.content
-            for message in reversed(example.messages[:-1])
-            if message.role == "user"
-        ),
+        (message.content for message in reversed(example.messages[:-1]) if message.role == "user"),
         "",
     )
     if example.observed_bubbles:

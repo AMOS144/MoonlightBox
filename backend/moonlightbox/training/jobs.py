@@ -20,10 +20,10 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from moonlightbox.branches.embeddings import LocalChineseEmbedder
 from moonlightbox.branches.identity import (
     EvidenceBackedIdentityKernelBuilder,
 )
+from moonlightbox.embeddings import LocalChineseEmbedder
 from moonlightbox.evaluation.blind_service import HumanBlindStudyService
 from moonlightbox.evaluation.models import HumanBlindStudy
 from moonlightbox.imports.models import Message, Participant
@@ -392,9 +392,7 @@ def run_lora_candidate_search(
             early_stopping_patience=early_stopping_patience,
             short_run_iterations=short_run_iterations,
             candidates=selected_candidates,
-            allow_single_candidate_semantic_fallback=(
-                allow_single_candidate_semantic_fallback
-            ),
+            allow_single_candidate_semantic_fallback=(allow_single_candidate_semantic_fallback),
             checkpoint=checkpoint,
             run_generation=str(owner["run_generation"]),
         )
@@ -491,9 +489,7 @@ def _run_lora_candidate_search_unlocked(
         "short_run_iterations": short_run_iterations,
         "candidate_selection_policy": {
             # 写入指纹，避免旧状态在改变短跑选择规则后被错误复用。
-            "allow_single_candidate_semantic_fallback": (
-                allow_single_candidate_semantic_fallback
-            ),
+            "allow_single_candidate_semantic_fallback": (allow_single_candidate_semantic_fallback),
             "fallback_rule": "validation_loss_only_for_explicit_single_candidate_v1",
         },
         "adapter_control": {
@@ -827,6 +823,7 @@ def _run_lora_candidate_search_unlocked(
             raise PeftTrainingError("完整训练没有可恢复的最佳 checkpoint")
         checkpoint_style_evaluations: list[dict[str, object]] = []
         if full_checkpoint_style_evaluator is not None:
+
             def save_checkpoint_style_evaluations(
                 audits: list[dict[str, object]],
             ) -> None:
@@ -843,9 +840,7 @@ def _run_lora_candidate_search_unlocked(
                 validation_curve=validation_curve,
                 fallback=best_selection,
                 style_evaluator=full_checkpoint_style_evaluator,
-                existing_audits=(
-                    existing_audits if isinstance(existing_audits, list) else None
-                ),
+                existing_audits=(existing_audits if isinstance(existing_audits, list) else None),
                 on_audit=save_checkpoint_style_evaluations,
             )
         best_checkpoint = best_selection.checkpoint
@@ -1348,9 +1343,7 @@ def _migrate_legacy_full_checkpoint_preservation_fingerprint(
         corrected = current_configs[best_candidate_id].get("best_candidate_full_run")
         if isinstance(corrected, str):
             full["normalized_config"] = corrected
-            full["config_fingerprint"] = hashlib.sha256(
-                corrected.encode("utf-8")
-            ).hexdigest()
+            full["config_fingerprint"] = hashlib.sha256(corrected.encode("utf-8")).hexdigest()
     _atomic_write_json(path, loaded)
 
 
@@ -2310,12 +2303,8 @@ def create_digital_human_training_handler(
                 token=token,
             )
 
-        persona_training = config.training_protocol_version.startswith(
-            "persona-plain-text"
-        )
-        compact_linux_candidate = persona_training and _is_compact_qwen3_1_7b(
-            config.base_model
-        )
+        persona_training = config.training_protocol_version.startswith("persona-plain-text")
+        compact_linux_candidate = persona_training and _is_compact_qwen3_1_7b(config.base_model)
         selected_candidates = (
             compact_persona_candidates()
             if compact_linux_candidate
@@ -2352,9 +2341,7 @@ def create_digital_human_training_handler(
                 max_epochs=maximum_epochs,
                 early_stopping_patience=2,
                 candidates=selected_candidates,
-                allow_single_candidate_semantic_fallback=(
-                    allow_single_candidate_semantic_fallback
-                ),
+                allow_single_candidate_semantic_fallback=(allow_single_candidate_semantic_fallback),
                 checkpoint=save_search_state,
             )
         except TrainingFingerprintMismatch as error:

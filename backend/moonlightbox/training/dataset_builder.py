@@ -667,7 +667,6 @@ class DatasetBuilder:
         return manifest
 
     # 仅兼容外部旧脚本；生产 Linux 训练入口使用 write_lora_dataset。
-    write_mlx_dataset = write_lora_dataset
 
 
 def _write_jsonl(path: Path, examples: list[TrainingExample]) -> None:

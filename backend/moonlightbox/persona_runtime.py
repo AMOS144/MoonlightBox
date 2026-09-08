@@ -20,7 +20,7 @@ from moonlightbox.agent.inference import (
     PersonaInferenceRequest,
     PersonaInferenceScheduler,
 )
-from moonlightbox.agent.linux_inference import DatabaseLinuxPersonaInferenceBackend
+from moonlightbox.agent.linux_inference import DatabaseLinuxRuntimeInferenceBackend
 from moonlightbox.config import Settings
 from moonlightbox.db import Database
 
@@ -30,9 +30,6 @@ logger = logging.getLogger(__name__)
 class _InferenceRequestPayload(BaseModel):
     request_id: str
     request_type: Literal[
-        "reply",
-        "cognition",
-        "fused_reply",
         "runtime_director",
         "runtime_actor",
         "runtime_token_count",
@@ -70,7 +67,7 @@ def create_persona_runtime_app(
         if resolved_backend is None:
             database = Database(resolved_settings.database_url)
             # API 与 Worker 不直接加载权重；CUDA 与 PEFT adapter 仅驻留在此服务。
-            resolved_backend = DatabaseLinuxPersonaInferenceBackend(
+            resolved_backend = DatabaseLinuxRuntimeInferenceBackend(
                 database,
                 device=resolved_settings.persona_device,
                 load_in_4bit=resolved_settings.persona_load_in_4bit,
@@ -105,9 +102,6 @@ def create_persona_runtime_app(
     def execute(
         payload: _InferenceRequestPayload,
         expected_type: Literal[
-            "reply",
-            "cognition",
-            "fused_reply",
             "runtime_director",
             "runtime_actor",
             "runtime_token_count",
@@ -151,18 +145,6 @@ def create_persona_runtime_app(
         }
 
     authentication = Depends(authenticate)
-
-    @app.post("/v1/inference/reply", dependencies=[authentication])
-    def reply(payload: _InferenceRequestPayload) -> dict[str, object]:
-        return execute(payload, "reply")
-
-    @app.post("/v1/inference/cognition", dependencies=[authentication])
-    def cognition(payload: _InferenceRequestPayload) -> dict[str, object]:
-        return execute(payload, "cognition")
-
-    @app.post("/v1/inference/fused-reply", dependencies=[authentication])
-    def fused_reply(payload: _InferenceRequestPayload) -> dict[str, object]:
-        return execute(payload, "fused_reply")
 
     @app.post("/v1/inference/runtime-director", dependencies=[authentication])
     def runtime_director(payload: _InferenceRequestPayload) -> dict[str, object]:

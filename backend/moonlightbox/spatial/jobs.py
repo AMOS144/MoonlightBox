@@ -6,8 +6,8 @@ from dataclasses import replace
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from moonlightbox.branches.embeddings import LocalChineseEmbedder
 from moonlightbox.config import Settings
+from moonlightbox.embeddings import LocalChineseEmbedder
 from moonlightbox.events.cloud_client import NodeAnalysisCloudClient
 from moonlightbox.jobs.models import Job
 from moonlightbox.jobs.registry import JobHandler, JobHandlerError

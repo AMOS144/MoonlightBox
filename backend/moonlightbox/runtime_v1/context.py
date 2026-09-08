@@ -10,9 +10,9 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from moonlightbox.branches.continuity_models import IdentityKernel
-from moonlightbox.branches.models import Branch, BranchMessage
+from moonlightbox.personas.models import IdentityKernel
 
+from .branch_models import Branch, BranchMessage
 from .config import (
     DIRECTOR_SYSTEM_PROMPT,
     INPUT_HARD_LIMIT,

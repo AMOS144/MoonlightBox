@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router-dom'
 
 import { request } from '../../api/client'
 import { Icon } from '../../components/Icon'
-import type { Branch } from '../branches/types'
+import type { RuntimeBranch } from '../branches/types'
 import type { EventNode } from '../events/types'
 import type { ModelVersion } from '../models/types'
 import type { Project } from './ProjectListPage'
@@ -34,8 +34,8 @@ export function ProjectOverviewPage() {
     enabled: Boolean(projectId),
   })
   const branches = useQuery({
-    queryKey: ['branches', projectId],
-    queryFn: () => request<Branch[]>(`/api/projects/${projectId}/branches`),
+    queryKey: ['runtime-branches', projectId],
+    queryFn: () => request<RuntimeBranch[]>(`/api/projects/${projectId}/runtime/branches`),
     enabled: Boolean(projectId),
   })
   const jobs = useQuery({

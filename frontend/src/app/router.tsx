@@ -3,7 +3,6 @@ import { createBrowserRouter } from 'react-router-dom'
 import { BranchChatPage } from '../features/branches/BranchChatPage'
 import { BranchCreatePage } from '../features/branches/BranchCreatePage'
 import { BranchListPage } from '../features/branches/BranchListPage'
-import { BranchPreparationPage } from '../features/branches/BranchPreparationPage'
 import { DataQualityPage } from '../features/data/DataQualityPage'
 import { EvaluationPage } from '../features/evaluation/EvaluationPage'
 import { NodeReviewPage } from '../features/events/NodeReviewPage'
@@ -39,10 +38,6 @@ export const router = createBrowserRouter([
           { path: 'branches', element: <BranchListPage /> },
           { path: 'branches/new', element: <BranchCreatePage /> },
           { path: 'branches/:branchId', element: <BranchChatPage /> },
-          {
-            path: 'branches/:branchId/preparing',
-            element: <BranchPreparationPage />,
-          },
           { path: 'evaluation', element: <EvaluationPage /> },
         ],
       },

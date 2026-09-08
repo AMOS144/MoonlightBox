@@ -119,9 +119,8 @@ class RuntimeMemoryRow(Base):
 class RuntimeMemoryIndexRow(Base):
     """分支统一记忆索引的不可变读取边界。
 
-    ``BranchStateVersion`` 仍由旧连续记忆流程使用，不能再被 Runtime v1 当作
-    事实库。本表只记录当前可检索的 ``RuntimeMemoryRow`` ID，方便查询、回放和
-    回滚在同一个明确边界上工作。
+    Runtime v1 退役旧连续记忆表后，只读取 ``RuntimeMemoryRow``。本表记录当前
+    可检索的记录 ID，方便查询、回放和回滚在同一个明确边界上工作。
     """
 
     __tablename__ = "runtime_memory_index_versions"

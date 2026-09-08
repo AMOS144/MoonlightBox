@@ -9,13 +9,13 @@ from langchain_core.tools import StructuredTool
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from moonlightbox.branches.continuity_models import IdentityKernel
-from moonlightbox.branches.history import BranchHistoryService
-from moonlightbox.branches.models import Branch
 from moonlightbox.imports.wechat_rendering import normalize_wechat_display
+from moonlightbox.personas.models import IdentityKernel
 
+from .branch_models import Branch
 from .config import TOOL_DESCRIPTIONS, TOOL_SCHEMAS
 from .schemas import GetStyleExamplesArgs
+from .source_history import RuntimeSourceHistory
 
 
 class StyleService:
@@ -80,7 +80,7 @@ def _authentic_style_examples(
 ) -> list[dict[str, object]]:
     """从分支冻结边界之前的真人对话选取少量 target 回复示例。"""
 
-    rows = BranchHistoryService(session).authentic_example_rows(branch, message_limit=500)
+    rows = RuntimeSourceHistory(session).authentic_example_rows(branch, message_limit=500)
     groups: list[tuple[str, list[tuple[str, str]]]] = []
     current_role: str | None = None
     current: list[tuple[str, str]] = []

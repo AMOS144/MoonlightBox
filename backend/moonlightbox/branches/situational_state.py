@@ -2,7 +2,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from moonlightbox.branches.memory_policy import is_current_state_question
-from moonlightbox.branches.models import Branch
 
 SituationalSource = Literal[
     "external_observation",
@@ -33,73 +32,6 @@ _SOURCE_PRIORITY = {
     "external_observation": 3,
     "agent_action": 3,
 }
-
-
-def set_situational_state(
-    branch: Branch,
-    *,
-    values: dict[str, str],
-    source: SituationalSource,
-    evidence_ids: tuple[str, ...],
-    observed_at: datetime,
-    valid_until: datetime,
-    confidence: float = 1.0,
-) -> dict[str, object]:
-    """Persist trusted, expiring working state without turning it into memory."""
-
-    if source not in _TRUSTED_SOURCES:
-        raise ValueError("短期情境状态来源不可信")
-    if not evidence_ids:
-        raise ValueError("短期情境状态必须包含证据")
-    if not 0 <= confidence <= 1:
-        raise ValueError("短期情境状态置信度必须在 0 到 1 之间")
-    if observed_at.tzinfo is None or valid_until.tzinfo is None:
-        raise ValueError("短期情境状态时间必须包含时区")
-    observed = observed_at.astimezone(UTC)
-    expires = valid_until.astimezone(UTC)
-    if expires <= observed or expires - observed > _MAX_TTL:
-        raise ValueError("短期情境状态有效期必须在 0 到 24 小时之间")
-    normalized = {
-        key: value.strip()
-        for key, value in values.items()
-        if key in _ALLOWED_SLOTS and isinstance(value, str) and value.strip()
-    }
-    if not normalized:
-        raise ValueError("短期情境状态没有有效槽位")
-    stored = branch.state_snapshot.get("situational_state")
-    slots = (
-        dict(stored.get("slots", {}))
-        if isinstance(stored, dict)
-        and stored.get("schema_version") == "situational-state-v2"
-        and isinstance(stored.get("slots"), dict)
-        else {}
-    )
-    for key, value in normalized.items():
-        candidate = {
-            "value": value,
-            "source": source,
-            "evidence_ids": list(dict.fromkeys(evidence_ids)),
-            "confidence": confidence,
-            "observed_at": observed.isoformat(),
-            "valid_until": expires.isoformat(),
-        }
-        existing = slots.get(key)
-        if not isinstance(existing, dict) or _candidate_wins(candidate, existing):
-            slots[key] = candidate
-    payload: dict[str, object] = {
-        "schema_version": "situational-state-v2",
-        "slots": slots,
-        "values": {
-            key: slot["value"]
-            for key, slot in slots.items()
-            if isinstance(slot, dict) and isinstance(slot.get("value"), str)
-        },
-    }
-    branch.state_snapshot = {
-        **branch.state_snapshot,
-        "situational_state": payload,
-    }
-    return payload
 
 
 def active_situational_state(

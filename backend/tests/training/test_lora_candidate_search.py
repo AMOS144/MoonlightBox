@@ -225,9 +225,7 @@ def test_search_runs_candidates_serially_and_full_trains_best(tmp_path: Path) ->
     assert state["full_training"]["best_validation_iteration"] == 2
     assert state["full_training"]["best_checkpoint_iteration"] == 1
     assert state["full_training"]["approximation_steps"] == 0
-    assert state["full_training"]["checkpoint_mapping_rule"] == (
-        "peft-validation-at-save-step"
-    )
+    assert state["full_training"]["checkpoint_mapping_rule"] == ("peft-validation-at-save-step")
     assert state["full_training"]["selection_validation_loss"] == 0.72
     assert state["full_training"]["verified_test_loss"] == 0.65
     assert adapter.evaluated_checkpoints == [result.adapter_dir]
@@ -262,9 +260,7 @@ def test_selected_checkpoint_is_independently_revalidated_before_publish(
         train_example_count=8,
         batch_size=1,
         style_evaluator=lambda _path: {"style_score": 1.0},
-        checkpoint_evaluator=lambda _config, path: (
-            evaluated.append(path) or 0.55
-        ),
+        checkpoint_evaluator=lambda _config, path: evaluated.append(path) or 0.55,
         max_epochs=1,
     )
 
@@ -331,10 +327,11 @@ def test_full_run_selects_semantically_valid_checkpoint_by_held_out_style(
     assert full["checkpoint_selection_strategy"] == "held_out_style_then_validation_v1"
     assert full["best_checkpoint_iteration"] == 2
     assert full["selection_validation_loss"] == 0.74
-    assert [
-        item["checkpoint_iteration"]
-        for item in full["checkpoint_style_evaluations"]
-    ] == [1, 2, 3]
+    assert [item["checkpoint_iteration"] for item in full["checkpoint_style_evaluations"]] == [
+        1,
+        2,
+        3,
+    ]
 
 
 def test_search_resumes_completed_candidates_and_rejects_fingerprint_change(
@@ -386,9 +383,7 @@ def test_search_resumes_completed_candidates_and_rejects_fingerprint_change(
     )
     result = run_lora_candidate_search(resumed, **common)
 
-    assert "rank16-attn16" not in {
-        config.adapter_dir.name for config in resumed.configs
-    }
+    assert "rank16-attn16" not in {config.adapter_dir.name for config in resumed.configs}
     assert result.best_candidate_id == "rank32-qv-all"
     with pytest.raises(TrainingFingerprintMismatch):
         run_lora_candidate_search(
@@ -604,9 +599,7 @@ def test_interrupted_full_run_restarts_clean_without_claiming_optimizer_resume(
     )
     result = run_lora_candidate_search(resumed, **common)
 
-    full_config = next(
-        config for config in resumed.configs if config.adapter_dir.name == "full"
-    )
+    full_config = next(config for config in resumed.configs if config.adapter_dir.name == "full")
     assert full_config.resume_adapter_file is None
     assert not (tmp_path / "search" / "full" / "partial.bin").exists()
     state = json.loads(result.state_path.read_text(encoding="utf-8"))
@@ -719,9 +712,7 @@ def test_migrates_only_legacy_checkpoint_preservation_fingerprint(tmp_path: Path
                 "fingerprint_payload": legacy_payload,
                 "best_candidate_id": "compact",
                 "full_training": {
-                    "normalized_config": legacy_normalized["compact"][
-                        "best_candidate_full_run"
-                    ],
+                    "normalized_config": legacy_normalized["compact"]["best_candidate_full_run"],
                 },
             }
         ),
@@ -929,10 +920,13 @@ def test_candidate_ranking_requires_semantic_pass_before_style_and_loss() -> Non
         },
     }
 
-    assert sorted(
-        [semantic_failure, valid_candidate],
-        key=_candidate_sort_key,
-    )[0]["candidate_id"] == "valid"
+    assert (
+        sorted(
+            [semantic_failure, valid_candidate],
+            key=_candidate_sort_key,
+        )[0]["candidate_id"]
+        == "valid"
+    )
 
 
 def test_candidate_ranking_rejects_all_semantic_failures(tmp_path: Path) -> None:
@@ -974,7 +968,7 @@ def test_explicit_single_candidate_fallback_only_selects_by_validation_loss(
 ) -> None:
     """受限设备的唯一候选可进入全量训练，但不会把短跑当作发布验收。"""
     from moonlightbox.training.jobs import run_lora_candidate_search
-    from moonlightbox.training.mlx_adapter import default_lora_candidates
+    from moonlightbox.training.peft_adapter import default_lora_candidates
 
     model_dir, data_dir = _training_paths(tmp_path)
     candidate = default_lora_candidates()[0]

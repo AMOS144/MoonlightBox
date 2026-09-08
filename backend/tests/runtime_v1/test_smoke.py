@@ -4,10 +4,10 @@ from datetime import UTC, datetime, timedelta
 
 import moonlightbox.api  # noqa: F401  # 注册全部 ORM 表
 from langchain_core.messages import AIMessage
-from moonlightbox.branches.models import Branch
 from moonlightbox.db import Base, Database
 from moonlightbox.events.models import EventNode
 from moonlightbox.projects.models import Project
+from moonlightbox.runtime_v1.branch_models import Branch
 from moonlightbox.runtime_v1.clock import create_clock, pause_clock, resume_clock
 from moonlightbox.runtime_v1.db_models import (
     RuntimeMemoryIndexRow,
@@ -91,7 +91,6 @@ def test_runtime_cycle_smoke_without_gpu(tmp_path) -> None:
                 model_version_id="m",
                 title="分支",
                 origin_time=now,
-                state_snapshot={},
             )
         )
         # Runtime v1 只允许从已完成的人物世界启动；测试直接放入冻结快照，
@@ -119,9 +118,12 @@ def test_runtime_cycle_smoke_without_gpu(tmp_path) -> None:
         )
         service.bootstrap("p", "b")
         # bootstrap 会建立独立 MemoryIndexVersion，不再把旧 BranchStateVersion 当作事实库。
-        assert session.scalar(
-            select(RuntimeMemoryIndexRow).where(RuntimeMemoryIndexRow.branch_id == "b")
-        ) is not None
+        assert (
+            session.scalar(
+                select(RuntimeMemoryIndexRow).where(RuntimeMemoryIndexRow.branch_id == "b")
+            )
+            is not None
+        )
         service.submit_user_message(
             project_id="p", branch_id="b", content="在吗", idempotency_key="msg-1"
         )
@@ -161,13 +163,16 @@ def test_runtime_cycle_smoke_without_gpu(tmp_path) -> None:
             session.get(RuntimeWakeupRow, wakeup.id).status == "completed"
             for wakeup in [first_plan_wakeup, *due_wakeups]
         )
-        assert session.scalar(
-            select(RuntimeWakeupRow).where(
-                RuntimeWakeupRow.branch_id == "b",
-                RuntimeWakeupRow.status == "scheduled",
-                RuntimeWakeupRow.wake_at > virtual_now,
+        assert (
+            session.scalar(
+                select(RuntimeWakeupRow).where(
+                    RuntimeWakeupRow.branch_id == "b",
+                    RuntimeWakeupRow.status == "scheduled",
+                    RuntimeWakeupRow.wake_at > virtual_now,
+                )
             )
-        ) is not None
+            is not None
+        )
 
         # Director 的不完整 speak 决定会在 Actor 之前被 Executor 拒绝，不能浪费
         # LoRA 调用，也不能让未校验意图进入公开表达层。

@@ -10,10 +10,12 @@ from uuid import uuid4
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from moonlightbox.branches.models import Branch, BranchMessage
+from moonlightbox.events.models import EventNode
 from moonlightbox.jobs.service import JobService
+from moonlightbox.training.models import ModelVersion
 
 from .actor import ActorModel, PersonaActor
+from .branch_models import Branch, BranchMessage
 from .clock import pause_clock, resume_clock
 from .context import ContextAssembler
 from .db_models import (
@@ -51,6 +53,55 @@ class RuntimeService:
         result = RuntimeExecutor(self.session).bootstrap(project_id=project_id, branch_id=branch_id)
         self.session.commit()
         return result
+
+    def create_branch(
+        self,
+        *,
+        project_id: str,
+        origin_event_id: str,
+        model_version_id: str,
+        title: str,
+        origin_time: datetime,
+    ) -> Branch:
+        """创建 Runtime 分支，不再排队旧 Baseline/认知初始化任务。"""
+
+        event = self.session.get(EventNode, origin_event_id)
+        if event is None or event.project_id != project_id:
+            raise LookupError("起点节点不存在")
+        model = self.session.get(ModelVersion, model_version_id)
+        if model is None or model.project_id != project_id or model.status != "ready":
+            raise ValueError("请选择当前项目已就绪的 LoRA 模型")
+        branch = Branch(
+            project_id=project_id,
+            origin_event_id=origin_event_id,
+            model_version_id=model_version_id,
+            title=title.strip(),
+            origin_time=origin_time,
+            lifecycle_status="active",
+        )
+        self.session.add(branch)
+        self.session.commit()
+        self.session.refresh(branch)
+        return branch
+
+    def list_branches(self, project_id: str) -> list[Branch]:
+        return list(
+            self.session.scalars(
+                select(Branch)
+                .where(Branch.project_id == project_id)
+                .order_by(Branch.created_at.desc())
+            )
+        )
+
+    def list_messages(self, project_id: str, branch_id: str) -> list[BranchMessage]:
+        self._branch(project_id, branch_id)
+        return list(
+            self.session.scalars(
+                select(BranchMessage)
+                .where(BranchMessage.branch_id == branch_id)
+                .order_by(BranchMessage.sequence, BranchMessage.created_at)
+            )
+        )
 
     def submit_user_message(
         self,

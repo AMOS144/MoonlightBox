@@ -11,7 +11,6 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from moonlightbox.branches.embeddings import LocalChineseEmbedder
 from moonlightbox.branches.identity import EvidenceBackedIdentityKernelBuilder
 from moonlightbox.branches.replies import (
     GeneratedBubble,
@@ -19,6 +18,7 @@ from moonlightbox.branches.replies import (
     drop_invalid_sticker_bubbles,
     validate_reply_sticker_ids,
 )
+from moonlightbox.embeddings import LocalChineseEmbedder
 from moonlightbox.evaluation.blind_service import HumanBlindStudyService
 from moonlightbox.imports.models import Participant
 from moonlightbox.jobs.models import Job
@@ -984,9 +984,7 @@ def retry_acceptance_only(
         20,
     )
     minimum_ratings = (
-        int(raw_minimum_ratings)
-        if isinstance(raw_minimum_ratings, int | float)
-        else 20
+        int(raw_minimum_ratings) if isinstance(raw_minimum_ratings, int | float) else 20
     )
     minimum_preference = _number_value(
         confirmation.config_snapshot.get("human_blind_minimum_preference"),

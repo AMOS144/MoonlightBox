@@ -9,18 +9,10 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from moonlightbox.agent.inference_client import PersonaInferenceClient
-from moonlightbox.agent.replay import (
-    GroundedReplayFactValidator,
-    HistoricalReplayRunner,
-)
-from moonlightbox.branches.continuity_models import IdentityKernel
-from moonlightbox.branches.embeddings import LocalChineseEmbedder
 from moonlightbox.branches.identity import EvidenceBackedIdentityKernelBuilder
-from moonlightbox.branches.reviewer import DeepSeekReplyReviewer
-from moonlightbox.branches.service import stage_candidate_branch
 from moonlightbox.config import Settings
 from moonlightbox.db import Database
+from moonlightbox.embeddings import LocalChineseEmbedder
 from moonlightbox.evaluation.blind_service import HumanBlindStudyService
 from moonlightbox.evaluation.models import HumanBlindStudy
 from moonlightbox.events.models import AnalysisRevision, AnalysisRun, EventNode
@@ -928,60 +920,6 @@ def _canonical_digest(payload: object) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def run_subject_agent_replay(
-    session: Session,
-    settings: Settings,
-    *,
-    project_id: str,
-    branch_id: str,
-    model_version_id: str,
-    sample_count: int,
-    activate_if_passed: bool,
-) -> dict[str, object]:
-    """执行可重复的主体历史回放，并仅在真实通过时激活。"""
-
-    model = session.get(ModelVersion, model_version_id)
-    manifest = (
-        model.training_config.get("data_manifest")
-        if model is not None and isinstance(model.training_config, dict)
-        else None
-    )
-    persona = manifest.get("target_sender") if isinstance(manifest, dict) else None
-    if not isinstance(persona, str) or not persona.strip():
-        raise RuntimeError("目标模型训练清单缺少 target_sender")
-
-    reviewer = None
-    if settings.reply_review_enabled and settings.node_analysis_api_key is not None:
-        reviewer = DeepSeekReplyReviewer(
-            endpoint=settings.node_analysis_endpoint,
-            model=settings.node_analysis_model,
-            api_key=settings.node_analysis_api_key.get_secret_value(),
-            timeout_seconds=settings.node_analysis_timeout_seconds,
-        )
-    kernel = session.scalar(
-        select(IdentityKernel).where(IdentityKernel.model_version_id == model_version_id)
-    )
-    validator = GroundedReplayFactValidator(
-        reviewer,
-        persona=persona,
-        identity_kernel=kernel.content if kernel is not None else None,
-    )
-    client = PersonaInferenceClient(
-        settings.persona_inference_url,
-        settings.persona_inference_token.get_secret_value(),
-        timeout=settings.persona_inference_timeout_seconds,
-        default_model_version_id=model_version_id,
-    )
-    result = HistoricalReplayRunner(session, client, validator).run(
-        project_id,
-        branch_id,
-        model_version_id,
-        sample_count=sample_count,
-        activate_if_passed=activate_if_passed,
-    )
-    return result.summary()
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="高保真 LoRA 数据审计与训练入口")
     parser.add_argument(
@@ -994,8 +932,6 @@ def main() -> None:
             "checkpoint-acceptance",
             "behavior-policy-backfill",
             "human-blind-backfill",
-            "candidate-branch-stage",
-            "subject-replay",
         ),
     )
     parser.add_argument("--project-id", required=True)
@@ -1110,34 +1046,8 @@ def main() -> None:
                 model_version_id=args.model_version_id,
                 sample_count=args.sample_count,
             )
-        elif args.action == "candidate-branch-stage":
-            if not args.branch_id or not args.model_version_id:
-                parser.error("candidate-branch-stage 必须指定 --branch-id 和 --model-version-id")
-            branch = stage_candidate_branch(
-                session,
-                project_id=args.project_id,
-                source_branch_id=args.branch_id,
-                model_version_id=args.model_version_id,
-            )
-            payload = {
-                "branch_id": branch.id,
-                "model_version_id": branch.model_version_id,
-                "baseline_status": branch.baseline_status,
-                "baseline_job_id": branch.baseline_job_id,
-                "subject_agent_mode": branch.subject_agent_mode,
-            }
         else:
-            if not args.branch_id or not args.model_version_id:
-                parser.error("subject-replay 必须指定 --branch-id 和 --model-version-id")
-            payload = run_subject_agent_replay(
-                session,
-                settings,
-                project_id=args.project_id,
-                branch_id=args.branch_id,
-                model_version_id=args.model_version_id,
-                sample_count=args.sample_count,
-                activate_if_passed=args.activate_if_passed,
-            )
+            parser.error("未知训练操作")
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 

@@ -3,13 +3,13 @@ import { Alert, Avatar, Badge, Button, Card, Group, SimpleGrid, Skeleton, Stack,
 import { Link, useParams } from 'react-router-dom'
 
 import { request } from '../../api/client'
-import type { Branch } from './types'
+import type { RuntimeBranch } from './types'
 
 export function BranchListPage() {
   const { projectId } = useParams()
   const branches = useQuery({
-    queryKey: ['branches', projectId],
-    queryFn: () => request<Branch[]>(`/api/projects/${projectId}/branches`),
+    queryKey: ['runtime-branches', projectId],
+    queryFn: () => request<RuntimeBranch[]>(`/api/projects/${projectId}/runtime/branches`),
     enabled: Boolean(projectId),
   })
 

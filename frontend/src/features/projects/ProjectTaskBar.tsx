@@ -22,7 +22,6 @@ const visibleKinds = new Set([
   'event_analysis_v2',
   'event_analysis_v3',
   'digital_human_training_v1',
-  'branch_baseline_build',
   'lightrag_world_build_v1',
 ])
 
@@ -72,14 +71,12 @@ export function ProjectTaskBar({ projectId }: { projectId: string }) {
 
 function taskLabel(job: ProjectJob): string {
   if (job.kind === 'digital_human_training_v1') return '正在训练数字人'
-  if (job.kind === 'branch_baseline_build') return '正在加载分支记忆'
   if (job.kind === 'lightrag_world_build_v1') return '正在重建人物世界'
   return '正在分析关键节点'
 }
 
 function linkLabel(job: ProjectJob): string {
   if (job.kind === 'digital_human_training_v1') return '查看训练进度'
-  if (job.kind === 'branch_baseline_build') return '查看准备进度'
   if (job.kind === 'lightrag_world_build_v1') return '查看人物背景'
   return '查看分析进度'
 }
@@ -87,12 +84,6 @@ function linkLabel(job: ProjectJob): string {
 function taskLink(projectId: string, job: ProjectJob): string {
   if (job.kind === 'digital_human_training_v1') {
     return `/projects/${projectId}/training/${job.id}`
-  }
-  if (
-    job.kind === 'branch_baseline_build' &&
-    typeof job.payload.branch_id === 'string'
-  ) {
-    return `/projects/${projectId}/branches/${job.payload.branch_id}/preparing`
   }
   if (job.kind === 'lightrag_world_build_v1') {
     return `/projects/${projectId}/world`

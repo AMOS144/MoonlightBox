@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from moonlightbox.agent.activation_service import SubjectAgentActivationService
 from moonlightbox.evaluation.models import HumanBlindCase, HumanBlindRating, HumanBlindStudy
 from moonlightbox.training.models import ModelVersion
 
@@ -201,15 +200,6 @@ class HumanBlindStudyService:
         valid = len(ratings)
         preference = (candidate_wins + 0.5 * ties) / valid if valid else 0.0
         passed = valid >= study.minimum_ratings and preference >= study.minimum_preference
-        activation_service = SubjectAgentActivationService(self._session)
-        replay_branch = None
-        if passed:
-            replay_branch = activation_service.latest_passed_branch_for_model(
-                project_id,
-                model_version_id,
-            )
-            if replay_branch is None:
-                raise BlindStudyStateError("候选模型尚未通过历史回放，不能完成真人盲测")
         study.valid_rating_count = valid
         study.candidate_preference_rate = preference
         study.status = "passed" if passed else "failed"
@@ -239,17 +229,6 @@ class HumanBlindStudyService:
             model.active = True
             model.recommended = True
             self._session.flush()
-            activated = activation_service.activate_latest_passed_branch_for_model(
-                project_id,
-                model_version_id,
-            )
-            if activated is not None:
-                report = {**report, "activated_branch_id": activated.id}
-                study.report = report
-                model.training_config = {
-                    **model.training_config,
-                    "human_blind_report": report,
-                }
         else:
             model.status = "human_review_failed_active" if was_active else "human_review_failed"
             model.active = was_active

@@ -10,16 +10,23 @@ from __future__ import annotations
 import gc
 import importlib
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from moonlightbox.agent.inference import InferencePreemptedError
-from moonlightbox.agent.mlx_inference import DatabasePersonaInferenceBackend
-from moonlightbox.branches.generation import GeneratorUnavailableError
+from moonlightbox.agent.inference import (
+    InferencePreemptedError,
+    PersonaInferenceRequest,
+    PersonaInferenceResult,
+)
 from moonlightbox.db import Database
+from moonlightbox.training.models import ModelVersion
+
+
+class RuntimeInferenceError(RuntimeError):
+    """Linux 人格服务无法满足 Runtime 请求。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +40,7 @@ class PersonaSamplingConfig:
     repetition_context_size: int = 128
 
 
-class LinuxModelFormatError(GeneratorUnavailableError):
+class LinuxModelFormatError(RuntimeInferenceError):
     """模型或 LoRA 文件不是 Linux/PEFT 可加载格式。"""
 
 
@@ -92,7 +99,7 @@ class SharedLinuxModelRuntime:
             self.model, self.tokenizer = self._load(base_model, adapter_path)
             self.loaded_key = loaded_key
         if self.model is None or self.tokenizer is None:
-            raise GeneratorUnavailableError("Linux 人格模型加载失败")
+            raise RuntimeInferenceError("Linux 人格模型加载失败")
 
         torch = self._dependencies()[0]
         inputs = self._tokenize(messages)
@@ -180,7 +187,7 @@ class SharedLinuxModelRuntime:
                         bnb_4bit_compute_dtype=torch.float16,
                     )
                 except (AttributeError, ImportError) as error:
-                    raise GeneratorUnavailableError(
+                    raise RuntimeInferenceError(
                         "4-bit Linux 推理需要安装 bitsandbytes；请执行 uv sync --extra linux-ml"
                     ) from error
                 model_kwargs["quantization_config"] = quantization
@@ -202,7 +209,7 @@ class SharedLinuxModelRuntime:
             model.eval()
         except (OSError, ValueError, RuntimeError) as error:
             self.release()
-            raise GeneratorUnavailableError(
+            raise RuntimeInferenceError(
                 "无法加载 Linux 人格模型；请确认基础模型、PEFT adapter 与显存配置匹配"
             ) from error
         return model, tokenizer
@@ -225,7 +232,7 @@ class SharedLinuxModelRuntime:
 
     def _tokenize(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         if self.tokenizer is None:
-            raise GeneratorUnavailableError("tokenizer 未加载")
+            raise RuntimeInferenceError("tokenizer 未加载")
         try:
             encoded = self.tokenizer.apply_chat_template(
                 messages,
@@ -250,18 +257,18 @@ class SharedLinuxModelRuntime:
 
     def _input_device(self) -> Any:
         if self.model is None:
-            raise GeneratorUnavailableError("模型未加载")
+            raise RuntimeInferenceError("模型未加载")
         try:
             return next(self.model.parameters()).device
         except StopIteration as error:
-            raise GeneratorUnavailableError("模型没有可用参数") from error
+            raise RuntimeInferenceError("模型没有可用参数") from error
 
     def _resolved_device(self, torch: Any) -> str:
         if self._device == "cpu":
             return "cpu"
         if self._device == "cuda":
             if not torch.cuda.is_available():
-                raise GeneratorUnavailableError("已配置 CUDA，但 Linux 中未检测到可用 NVIDIA GPU")
+                raise RuntimeInferenceError("已配置 CUDA，但 Linux 中未检测到可用 NVIDIA GPU")
             return "cuda"
         return "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -281,8 +288,8 @@ class SharedLinuxModelRuntime:
             return
         if path.is_file() or not (path / "adapter_config.json").is_file():
             raise LinuxModelFormatError(
-                "现有 adapter 是 MLX 格式或不完整。请先执行 "
-                "`python -m moonlightbox.training.convert_mlx_adapter` 转成 PEFT 格式"
+                "adapter 不是完整的 Linux PEFT 目录；需要 adapter_config.json 与 "
+                "adapter_model.safetensors"
             )
         if not (path / "adapter_model.safetensors").is_file():
             raise LinuxModelFormatError("PEFT adapter 目录缺少 adapter_model.safetensors")
@@ -296,7 +303,7 @@ class SharedLinuxModelRuntime:
         memory_bytes = torch.cuda.get_device_properties(0).total_memory
         if memory_bytes < 10 * 1024**3:
             memory_gib = memory_bytes / 1024**3
-            raise GeneratorUnavailableError(
+            raise RuntimeInferenceError(
                 "历史 Qwen3-8B LoRA 需要至少约 10GB GPU 显存；"
                 f"当前仅检测到 {memory_gib:.1f}GB。请使用更大 Linux GPU，"
                 "或为 1.7B 基座重新训练 LoRA。"
@@ -309,7 +316,7 @@ class SharedLinuxModelRuntime:
             try:
                 torch = self._import_module("torch")
             except ImportError as error:
-                raise GeneratorUnavailableError(
+                raise RuntimeInferenceError(
                     "未安装 Linux 模型依赖；请执行 uv sync --extra linux-ml"
                 ) from error
             self._torch = torch
@@ -317,7 +324,7 @@ class SharedLinuxModelRuntime:
             transformers = self._import_module("transformers")
             peft = self._import_module("peft")
         except ImportError as error:
-            raise GeneratorUnavailableError(
+            raise RuntimeInferenceError(
                 "未安装 Transformers/PEFT；请执行 uv sync --extra linux-ml"
             ) from error
         return torch, transformers, peft
@@ -333,8 +340,8 @@ class SharedLinuxModelRuntime:
             raise InferencePreemptedError("推理已超过截止时间")
 
 
-class DatabaseLinuxPersonaInferenceBackend(DatabasePersonaInferenceBackend):
-    """复用既有请求协议，替换其底层模型 runtime 为 Linux 实现。"""
+class DatabaseLinuxRuntimeInferenceBackend:
+    """仅实现 Runtime Director、PersonaActor 与 token 计数三种 Linux 请求。"""
 
     def __init__(
         self,
@@ -343,5 +350,71 @@ class DatabaseLinuxPersonaInferenceBackend(DatabasePersonaInferenceBackend):
         device: str = "auto",
         load_in_4bit: bool = True,
     ) -> None:
-        runtime = SharedLinuxModelRuntime(device=device, load_in_4bit=load_in_4bit)
-        super().__init__(database, runtime=runtime)
+        self._database = database
+        self._runtime = SharedLinuxModelRuntime(device=device, load_in_4bit=load_in_4bit)
+
+    def infer(
+        self,
+        request: PersonaInferenceRequest,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> PersonaInferenceResult:
+        if request.request_type not in {
+            "runtime_director",
+            "runtime_actor",
+            "runtime_token_count",
+        }:
+            raise RuntimeInferenceError("不支持的 Runtime 推理请求类型")
+        base_model, adapter_path = self._model_paths(request.model_version_id)
+        system_prompt = request.payload.get("system_prompt")
+        if request.request_type == "runtime_token_count":
+            text = request.payload.get("text")
+            if not isinstance(text, str):
+                raise RuntimeInferenceError("Runtime token 计数请求结构无效")
+            output: Mapping[str, object] = {
+                "count": self._runtime.count_text_tokens(base_model=base_model, text=text)
+            }
+        else:
+            raw_messages = request.payload.get("messages")
+            if not isinstance(system_prompt, str) or not isinstance(raw_messages, list):
+                raise RuntimeInferenceError("Runtime 推理请求结构无效")
+            messages = self._validate_messages(raw_messages)
+            output = {
+                "content": self._runtime.generate_raw(
+                    base_model=base_model,
+                    # Director 只使用基座；Actor 才挂当前已验收的 LoRA。
+                    adapter_path=adapter_path if request.request_type == "runtime_actor" else None,
+                    messages=[{"role": "system", "content": system_prompt}, *messages],
+                    max_tokens=512,
+                    should_cancel=should_cancel,
+                    deadline=request.deadline,
+                )
+            }
+        return PersonaInferenceResult(
+            request_id=request.request_id,
+            request_type=request.request_type,
+            output=output,
+        )
+
+    def _model_paths(self, model_version_id: str) -> tuple[str, str]:
+        from sqlalchemy.orm import Session
+
+        with Session(self._database.engine) as session:
+            version = session.get(ModelVersion, model_version_id)
+            if version is None:
+                raise RuntimeInferenceError("模型版本不存在")
+            return version.base_model, version.adapter_path
+
+    @staticmethod
+    def _validate_messages(raw_messages: list[object]) -> list[dict[str, str]]:
+        messages: list[dict[str, str]] = []
+        for item in raw_messages:
+            if not isinstance(item, dict):
+                raise RuntimeInferenceError("Runtime 消息结构无效")
+            role, content = item.get("role"), item.get("content")
+            if role not in {"user", "assistant", "tool"} or not isinstance(content, str):
+                raise RuntimeInferenceError("Runtime 消息结构无效")
+            messages.append({"role": "user" if role == "tool" else role, "content": content})
+        return messages
+
+    def close(self) -> None:
+        self._runtime.release()

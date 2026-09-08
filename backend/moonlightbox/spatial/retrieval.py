@@ -6,7 +6,7 @@ import chromadb
 import yaml
 from chromadb.api.types import Embeddings
 
-from moonlightbox.branches.embeddings import TextEmbedder
+from moonlightbox.embeddings import TextEmbedder
 from moonlightbox.spatial.episodes import EpisodeManifest
 
 
@@ -62,9 +62,9 @@ class SpatialEpisodeIndex:
         embedder: TextEmbedder,
     ) -> None:
         client = chromadb.PersistentClient(path=chroma_dir)
-        collection_name = (
-            f"spatial_{project_id.replace('-', '_')}_{import_id.replace('-', '_')}"
-        )[:63]
+        collection_name = (f"spatial_{project_id.replace('-', '_')}_{import_id.replace('-', '_')}")[
+            :63
+        ]
         self._embedder = embedder
         self._collection = client.get_or_create_collection(
             name=collection_name,
@@ -114,9 +114,7 @@ class SpatialEpisodeIndex:
                 self._embedder.embed([query.text for query in queries]),
             )
             for partition in sorted({episode.time_partition for episode in episodes}):
-                partition_count = sum(
-                    episode.time_partition == partition for episode in episodes
-                )
+                partition_count = sum(episode.time_partition == partition for episode in episodes)
                 if partition_count == 0:
                     continue
                 result = self._collection.query(
@@ -173,4 +171,3 @@ def _nested(value: object) -> list[list[Any]]:
     if not isinstance(value, list):
         return []
     return [item if isinstance(item, list) else [] for item in value]
-

@@ -8,15 +8,15 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from moonlightbox.agent.inference_client import PersonaInferenceClient
-from moonlightbox.branches.models import Branch
 from moonlightbox.db import Database
 from moonlightbox.jobs.models import Job
 from moonlightbox.jobs.service import JobService
 from moonlightbox.world.models import PersonWorldProfile, WorldGraphVersion
 
+from .branch_models import Branch
 from .clock import create_clock
 from .db_models import RuntimeClockRow, RuntimeSnapshotRow, RuntimeWakeupRow
+from .inference_client import RuntimeInferenceClient
 from .remote_models import create_remote_models
 from .service import RuntimeService
 
@@ -53,9 +53,7 @@ def enqueue_due_runtime_cycles(
                 clock_row.virtual_anchor,
                 wall_anchor=clock_row.wall_anchor,
                 timezone=clock_row.timezone,
-            ).model_copy(
-                update={"time_scale": clock_row.time_scale, "status": clock_row.status}
-            )
+            ).model_copy(update={"time_scale": clock_row.time_scale, "status": clock_row.status})
             virtual_now = clock.now(wall_now)
             if _as_utc(row.wake_at) > _as_utc(virtual_now):
                 continue
@@ -73,7 +71,6 @@ def enqueue_due_runtime_cycles(
             .outerjoin(RuntimeSnapshotRow, RuntimeSnapshotRow.branch_id == Branch.id)
             .where(
                 Branch.lifecycle_status == "active",
-                Branch.baseline_status == "ready",
                 RuntimeSnapshotRow.id.is_(None),
             )
             .limit(limit)
@@ -112,7 +109,7 @@ def _as_utc(value: datetime) -> datetime:
 
 def create_runtime_cycle_handler(
     *,
-    persona_client: PersonaInferenceClient,
+    persona_client: RuntimeInferenceClient,
 ) -> Callable[[JobService, Job], None]:
     """Worker 每次只处理一个分支 Cycle，并经 HTTP 请求 Linux 人格推理服务。"""
 
@@ -126,9 +123,7 @@ def create_runtime_cycle_handler(
             project_id = branch.project_id if branch is not None else None
         if not isinstance(project_id, str):
             raise ValueError("Runtime job 缺少 project_id/branch_id")
-        director, actor = create_remote_models(
-            service.session, branch_id, client=persona_client
-        )
+        director, actor = create_remote_models(service.session, branch_id, client=persona_client)
         RuntimeService(
             service.session,
             director_model=director,

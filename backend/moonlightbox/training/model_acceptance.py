@@ -19,7 +19,6 @@ from moonlightbox.branches.context import (
     ContextRequest,
     ContextTurn,
 )
-from moonlightbox.branches.embeddings import TextEmbedder
 from moonlightbox.branches.generation_semantics import rewrite_preserves_hard_semantics
 from moonlightbox.branches.memory_policy import is_current_state_question
 from moonlightbox.branches.replies import (
@@ -40,6 +39,7 @@ from moonlightbox.branches.understanding import (
     understand_contributions,
     validate_fact_grounded_reply,
 )
+from moonlightbox.embeddings import TextEmbedder
 from moonlightbox.training.bubble_protocol import (
     allowed_sticker_ids_from_prompt,
     compact_protocol_instruction,

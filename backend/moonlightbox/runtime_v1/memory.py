@@ -10,10 +10,9 @@ from langchain_core.tools import StructuredTool
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from moonlightbox.branches.continuity_models import BranchMemoryEpisode, BranchMemoryItem
-from moonlightbox.branches.models import BranchMessage
 from moonlightbox.imports.models import Message
 
+from .branch_models import BranchMessage
 from .config import TOOL_DESCRIPTIONS, TOOL_SCHEMAS
 from .db_models import RuntimeLifeEventRow, RuntimeMemoryIndexRow, RuntimeMemoryRow
 from .schemas import MemoryEvidence, MemoryRecord, SearchMemoryArgs
@@ -46,56 +45,6 @@ class MemoryService:
         )
         self.session.add(row)
         return record
-
-    def migrate_legacy_branch_items(self, branch_id: str) -> int:
-        """一次性投影旧的已审核记忆，Runtime v1 绝不读取 pending 项。
-
-        历史 ``BranchMemoryItem`` 仍可能被旧功能使用，因此这里采用可重复执行的
-        复制迁移，而不是删除或改写旧表。旧 episode ID 保留为 source_ids，查询时
-        可以继续追溯到原始双边对话。
-        """
-
-        existing_ids = set(
-            self.session.scalars(
-                select(RuntimeMemoryRow.id).where(
-                    RuntimeMemoryRow.scope == "branch",
-                    RuntimeMemoryRow.branch_id == branch_id,
-                )
-            )
-        )
-        legacy_rows = self.session.scalars(
-            select(BranchMemoryItem).where(
-                BranchMemoryItem.branch_id == branch_id,
-                BranchMemoryItem.review_status == "approved",
-                BranchMemoryItem.invalidated_at.is_(None),
-            )
-        )
-        migrated = 0
-        for item in legacy_rows:
-            if item.id in existing_ids:
-                continue
-            self.session.add(
-                RuntimeMemoryRow(
-                    id=item.id,
-                    scope="branch",
-                    branch_id=branch_id,
-                    subject=item.subject,
-                    predicate=item.predicate,
-                    object=item.object[:500],
-                    summary=item.content[:2000],
-                    status="confirmed",
-                    source_ids=list(item.source_episode_ids or []),
-                    confidence=float(item.confidence),
-                    valid_from=item.valid_from,
-                    valid_to=item.valid_to,
-                    supersedes_id=item.supersedes_id,
-                    created_at=item.created_at,
-                )
-            )
-            migrated += 1
-        if migrated:
-            self.session.flush()
-        return migrated
 
     def current_index(self, branch_id: str) -> RuntimeMemoryIndexRow | None:
         return self.session.scalar(
@@ -171,11 +120,7 @@ class MemoryService:
             row
             for row in self.session.scalars(query.order_by(RuntimeMemoryRow.created_at.desc()))
             if (row.valid_to is None or _at_or_after(row.valid_to, current))
-            and (
-                row.scope != "branch"
-                or branch_record_ids is None
-                or row.id in branch_record_ids
-            )
+            and (row.scope != "branch" or branch_record_ids is None or row.id in branch_record_ids)
         ]
         terms = _query_terms(args.query)
         excluded = excluded_source_ids or set()
@@ -268,13 +213,6 @@ class MemoryService:
         )
         if isinstance(life_event, dict):
             return str(life_event)[:1200]
-        episode = self.session.scalar(
-            select(BranchMemoryEpisode.user_content)
-            .where(BranchMemoryEpisode.id.in_(source_ids))
-            .limit(1)
-        )
-        if isinstance(episode, str):
-            return episode[:1200]
         return None
 
 

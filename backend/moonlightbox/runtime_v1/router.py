@@ -46,8 +46,23 @@ class RuntimeMemoryConfirm(BaseModel):
     confidence: float = Field(default=1.0, ge=0, le=1)
 
 
+class RuntimeBranchCreate(BaseModel):
+    """创建 Runtime 分支所需的最小、可审计输入。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    origin_event_id: str = Field(min_length=1)
+    model_version_id: str = Field(min_length=1)
+    title: str = Field(min_length=1, max_length=255)
+    origin_time: datetime
+
+
 def create_runtime_router(database: Database, settings: Settings) -> APIRouter:
-    router = APIRouter(
+    router = APIRouter(tags=["runtime-v1"])
+    branch_router = APIRouter(
+        prefix="/api/projects/{project_id}/runtime/branches", tags=["runtime-v1"]
+    )
+    cycle_router = APIRouter(
         prefix="/api/projects/{project_id}/branches/{branch_id}/runtime", tags=["runtime-v1"]
     )
 
@@ -55,7 +70,42 @@ def create_runtime_router(database: Database, settings: Settings) -> APIRouter:
         yield from database.session()
 
     SessionDependency = Annotated[Session, Depends(get_session)]
-    @router.post("/bootstrap", status_code=status.HTTP_201_CREATED)
+
+    @branch_router.post("", status_code=status.HTTP_201_CREATED)
+    def create_branch(
+        project_id: str, payload: RuntimeBranchCreate, session: SessionDependency
+    ) -> dict[str, object]:
+        try:
+            branch = RuntimeService(session).create_branch(
+                project_id=project_id,
+                origin_event_id=payload.origin_event_id,
+                model_version_id=payload.model_version_id,
+                title=payload.title,
+                origin_time=payload.origin_time,
+            )
+            return _branch_payload(branch)
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @branch_router.get("")
+    def list_branches(project_id: str, session: SessionDependency) -> list[dict[str, object]]:
+        return [_branch_payload(item) for item in RuntimeService(session).list_branches(project_id)]
+
+    @branch_router.get("/{branch_id}/messages")
+    def list_messages(
+        project_id: str, branch_id: str, session: SessionDependency
+    ) -> list[dict[str, object]]:
+        try:
+            return [
+                _branch_message_payload(item)
+                for item in RuntimeService(session).list_messages(project_id, branch_id)
+            ]
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @cycle_router.post("/bootstrap", status_code=status.HTTP_201_CREATED)
     def bootstrap(project_id: str, branch_id: str, session: SessionDependency) -> dict[str, object]:
         try:
             result = RuntimeService(session).bootstrap(project_id, branch_id)
@@ -69,7 +119,7 @@ def create_runtime_router(database: Database, settings: Settings) -> APIRouter:
         except RuntimeWorldUnavailableError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
-    @router.get("/snapshot")
+    @cycle_router.get("/snapshot")
     def snapshot(project_id: str, branch_id: str, session: SessionDependency) -> object:
         try:
             row = RuntimeService(session).get_snapshot(project_id, branch_id)
@@ -91,21 +141,21 @@ def create_runtime_router(database: Database, settings: Settings) -> APIRouter:
         except LookupError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
-    @router.get("/state")
+    @cycle_router.get("/state")
     def state(project_id: str, branch_id: str, session: SessionDependency) -> dict[str, object]:
         try:
             return RuntimeService(session).get_state(project_id, branch_id)
         except LookupError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
-    @router.get("/clock")
+    @cycle_router.get("/clock")
     def get_clock(project_id: str, branch_id: str, session: SessionDependency) -> object:
         try:
             return RuntimeService(session).get_clock(project_id, branch_id).model_dump(mode="json")
         except LookupError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
-    @router.get("/day-plan")
+    @cycle_router.get("/day-plan")
     def get_day_plan(project_id: str, branch_id: str, session: SessionDependency) -> object:
         try:
             plan = RuntimeService(session).get_plan(project_id, branch_id)
@@ -113,7 +163,7 @@ def create_runtime_router(database: Database, settings: Settings) -> APIRouter:
         except LookupError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
-    @router.post("/messages", status_code=status.HTTP_202_ACCEPTED)
+    @cycle_router.post("/messages", status_code=status.HTTP_202_ACCEPTED)
     def enqueue_message(
         project_id: str, branch_id: str, payload: RuntimeMessageCreate, session: SessionDependency
     ) -> dict[str, object]:
@@ -138,13 +188,13 @@ def create_runtime_router(database: Database, settings: Settings) -> APIRouter:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
     # events 是 messages 的语义别名，方便 Worker/客户端按设计文档命名调用。
-    @router.post("/events", status_code=status.HTTP_202_ACCEPTED)
+    @cycle_router.post("/events", status_code=status.HTTP_202_ACCEPTED)
     def enqueue_event(
         project_id: str, branch_id: str, payload: RuntimeMessageCreate, session: SessionDependency
     ) -> dict[str, object]:
         return enqueue_message(project_id, branch_id, payload, session)
 
-    @router.post("/memories/confirm", status_code=status.HTTP_201_CREATED)
+    @cycle_router.post("/memories/confirm", status_code=status.HTTP_201_CREATED)
     def confirm_memory(
         project_id: str,
         branch_id: str,
@@ -179,7 +229,7 @@ def create_runtime_router(database: Database, settings: Settings) -> APIRouter:
             session.rollback()
             raise HTTPException(status_code=422, detail=str(error)) from error
 
-    @router.post("/clock")
+    @cycle_router.post("/clock")
     def change_clock(
         project_id: str, branch_id: str, payload: RuntimeClockAction, session: SessionDependency
     ) -> object:
@@ -192,7 +242,23 @@ def create_runtime_router(database: Database, settings: Settings) -> APIRouter:
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
+    router.include_router(branch_router)
+    router.include_router(cycle_router)
     return router
+
+
+def _branch_payload(branch: object) -> dict[str, object]:
+    fields = (
+        "id",
+        "project_id",
+        "origin_event_id",
+        "model_version_id",
+        "title",
+        "origin_time",
+        "lifecycle_status",
+        "created_at",
+    )
+    return {field: getattr(branch, field) for field in fields}
 
 
 def _branch_message_payload(message: object) -> dict[str, object]:
@@ -213,8 +279,6 @@ def _branch_message_payload(message: object) -> dict[str, object]:
         "generation_metadata",
         "client_message_id",
         "observed_at",
-        "expression_plan_id",
-        "actor_intent",
         "is_proactive",
         "created_at",
     )

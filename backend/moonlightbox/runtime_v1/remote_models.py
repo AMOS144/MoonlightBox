@@ -13,9 +13,8 @@ from uuid import uuid4
 from langchain_core.messages import AIMessage
 from sqlalchemy.orm import Session
 
-from moonlightbox.agent.inference_client import PersonaInferenceClient
-from moonlightbox.branches.models import Branch
-
+from .branch_models import Branch
+from .inference_client import RuntimeInferenceClient
 from .schemas import GetStyleExamplesArgs, SearchMemoryArgs
 
 
@@ -23,7 +22,7 @@ def create_remote_models(
     session: Session,
     branch_id: str,
     *,
-    client: PersonaInferenceClient,
+    client: RuntimeInferenceClient,
 ) -> tuple[RemoteDirectorChatModel, RemotePersonaActorChatModel]:
     """按分支解析模型版本，创建只走 HTTP 的 Director 与 PersonaActor。"""
 
@@ -47,7 +46,7 @@ class RemoteDirectorChatModel:
 
     def __init__(
         self,
-        client: PersonaInferenceClient,
+        client: RuntimeInferenceClient,
         model_version_id: str,
         *,
         tool_names: frozenset[str] = frozenset(),
@@ -93,7 +92,7 @@ class RemotePersonaActorChatModel:
 
     def __init__(
         self,
-        client: PersonaInferenceClient,
+        client: RuntimeInferenceClient,
         model_version_id: str,
         *,
         tool_names: frozenset[str] = frozenset(),

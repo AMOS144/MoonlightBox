@@ -29,9 +29,6 @@ class PersonaInferenceRequest:
 
     request_id: str
     request_type: Literal[
-        "reply",
-        "cognition",
-        "fused_reply",
         "runtime_director",
         "runtime_actor",
         "runtime_token_count",
@@ -57,9 +54,6 @@ class PersonaInferenceResult:
 
     request_id: str
     request_type: Literal[
-        "reply",
-        "cognition",
-        "fused_reply",
         "runtime_director",
         "runtime_actor",
         "runtime_token_count",
@@ -192,7 +186,7 @@ class PersonaInferenceScheduler:
                     next(self._sequence),
                     PersonaInferenceRequest(
                         request_id="__shutdown__",
-                        request_type="reply",
+                        request_type="runtime_director",
                         priority=InferencePriority.REALTIME,
                         deadline=datetime.max.replace(tzinfo=UTC),
                         model_version_id="__shutdown__",
@@ -255,8 +249,7 @@ class PersonaInferenceScheduler:
         infer = self._backend.infer
         parameters = signature(infer).parameters.values()
         supports_cancel = any(
-            parameter.name == "should_cancel"
-            or parameter.kind is Parameter.VAR_KEYWORD
+            parameter.name == "should_cancel" or parameter.kind is Parameter.VAR_KEYWORD
             for parameter in parameters
         )
         if supports_cancel:
