@@ -11,8 +11,10 @@ dependencies = [
     "fastapi>=0.139.2",
     "fastembed>=0.8.0",
     "httpx>=0.28.1",
+    "arize-phoenix-otel>=0.16.0",
     "langchain>=0.3.0",
     "langgraph>=0.2.0",
+    "openinference-instrumentation-langchain>=0.1.0",
     "pydantic-settings>=2.14.2",
     "python-multipart>=0.0.32",
     "pyyaml>=6.0.3",
@@ -20,9 +22,14 @@ dependencies = [
     "sqlalchemy>=2.0.51",
     "uvicorn[standard]>=0.51.0",
     "zstandard>=0.25.0",
+    "langgraph-checkpoint-sqlite>=3.1.1",
 ]
 
 [project.optional-dependencies]
+observability = [
+    # 本机开发直接运行 Phoenix，避免为查看 Trace 再启动一整套业务 Docker 容器。
+    "arize-phoenix>=11.15.0",
+]
 linux-ml = [
     "accelerate>=1.12.0",
     "bitsandbytes>=0.48.0",

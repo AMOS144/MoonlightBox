@@ -4,7 +4,7 @@ WORKDIR /app
 ENV PATH="/app/.venv/bin:$PATH"
 
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev --no-install-project --extra linux-ml
+RUN uv sync --frozen --no-dev --no-install-project --extra observability --extra linux-ml
 
 COPY backend ./backend
 RUN chmod +x /app/backend/docker-entrypoint.sh

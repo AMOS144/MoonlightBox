@@ -5,6 +5,12 @@ x-backend-environment: &backend-environment
   MOONLIGHTBOX_DATA_DIR: /app/data
   MOONLIGHTBOX_CHROMA_DIR: /app/data/chroma
   MOONLIGHTBOX_MODEL_DIR: /app/models
+  # Phoenix 是可选的 Agent Trace 浏览器。业务账本仍在 MoonlightBox SQLite 内，
+  # Collector 故障不会参与任务状态判定。
+  MOONLIGHTBOX_PHOENIX_ENABLED: ${MOONLIGHTBOX_PHOENIX_ENABLED:-true}
+  MOONLIGHTBOX_PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006/v1/traces
+  MOONLIGHTBOX_PHOENIX_PROJECT_NAME: ${MOONLIGHTBOX_PHOENIX_PROJECT_NAME:-moonlightbox}
+  MOONLIGHTBOX_PHOENIX_CAPTURE_CONTENT: ${MOONLIGHTBOX_PHOENIX_CAPTURE_CONTENT:-false}
   MOONLIGHTBOX_LIGHTRAG_ENABLED: ${MOONLIGHTBOX_LIGHTRAG_ENABLED:-true}
   MOONLIGHTBOX_LIGHTRAG_SIDECAR_URL: http://lightrag-sidecar:9621
   MOONLIGHTBOX_LIGHTRAG_SIDECAR_TOKEN: ${MOONLIGHTBOX_LIGHTRAG_SIDECAR_TOKEN:-development-only-token}
@@ -26,10 +32,26 @@ x-backend-common: &backend-common
       required: false
   environment: *backend-environment
   volumes:
-    - ./data:/app/data
+    # 运行数据必须位于具体 worktree 之外。默认路径对 `.worktrees/*`
+    # 下的所有工作树一致，也可用绝对路径覆盖以适配其他部署目录。
+    - ${MOONLIGHTBOX_HOST_DATA_DIR:-../.runtime-data/data}:/app/data
     - ./models:/app/models
 
 services:
+  phoenix:
+    # 固定可复现版本；升级 Phoenix 应作为独立运维变更，而不是跟随 latest 静默变化。
+    image: arizephoenix/phoenix:version-20.9.0
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/phoenix
+      PHOENIX_DISABLE_AGENT_ASSISTANT: "true"
+      PHOENIX_LOG_MIGRATIONS: "false"
+      PHOENIX_DB_LOGGING_LEVEL: warning
+    ports:
+      - "6006:6006"
+    volumes:
+      - phoenix-data:/mnt/phoenix
+    restart: unless-stopped
+
   lightrag-sidecar:
     build:
       context: ./sidecars/lightrag_sidecar
@@ -227,3 +249,4 @@ services:
 
 volumes:
   lightrag-data:
+  phoenix-data:

@@ -127,6 +127,32 @@ MOONLIGHTBOX_COGNITION_MAX_OUTPUT_TOKENS=4096
 启用云端认知后，最近双边聊天、稳定人格、关系状态和经过审核的相关记忆会发送给所配置的
 DeepSeek 服务；原始媒体文件、私有认知结果和本地模型权重不会上传。
 
+### Agent Trace（Phoenix）
+
+所有 Runtime v1（Director、DayPlanAgent、PersonaActor）、PersonWorld 七栏目 Agent 和
+Revision Agent 都由统一 `AgentLoopController` 建立 Phoenix Trace。一个 Trace 的根节点对应
+一次 Agent 执行，子节点包含 LangGraph 节点、Agent 决策回合、实际供应商模型请求、实际执行的
+工具调用、LightRAG 检索、上下文压缩、耗时、错误码、终态与项目/分支/栏目关联字段。根 Span 会
+分别汇总 Agent 回合数和供应商请求数：一次栏目决策内的 Schema 修复不会再被藏成一个黑盒。可直接
+在 Phoenix 中筛选
+`moonlightbox.agent.name`、`moonlightbox.owner.type`、`moonlightbox.branch.id` 或
+`moonlightbox.agent.execution_id`，而不必翻数据库事件表。
+
+本机执行 `./scripts/start.sh` 会启动独立的 Phoenix 进程，不需要启动业务 Docker 容器；访问
+`http://127.0.0.1:6006` 查看。Trace 存储在 worktree 外的
+`.runtime-data/phoenix`。若只想运行业务服务，可设
+`MOONLIGHTBOX_PHOENIX_ENABLED=false`。
+
+标准 `./scripts/start.sh` 只连接本机 Phoenix。单值输入/输出属性受
+`MOONLIGHTBOX_PHOENIX_TRACE_MAX_CHARACTERS` 限制，但开启 `MOONLIGHTBOX_PHOENIX_CAPTURE_CONTENT`
+（本机默认开启）后，完整的启动上下文、模型请求/响应、工具参数/结果、LightRAG 返回和压缩前后
+上下文会以分块 Span event 保存；API key 仍会强制脱敏。根 Span 还会写入确定性根因摘要并异步创建
+Phoenix CODE annotation。可通过只读 API
+`/api/observability/agent-executions/{execution_id}` 取得完整原始 Span 树。若不希望保存正文，可显式
+设 `MOONLIGHTBOX_PHOENIX_CAPTURE_CONTENT=false`，此时仍保留 Span 层级、耗时、模型名、工具名、状态、
+错误码和输入输出 hash。项目不再维护通用 Agent 的数据库调用账本；领域业务的审核和执行结果仍由
+各自领域表管理，Phoenix 不参与业务写入或完成判定。
+
 节点分析完成后，在节点页按时间轴检查“关系变化”和“共同经历”，排除误报，再点击
 “确认时间轴并开始训练”。Worker 会使用真实聊天回复和已确认节点背景生成聊天 JSONL
 数据集，以 assistant 目标掩码执行本地 QLoRA；训练成功后新模型先进入候选和真人盲测，不会
@@ -187,19 +213,24 @@ PYTHONPATH=backend uv run python -m moonlightbox.media.cli \
 ### 分支 Runtime v1
 
 聊天页发送的新消息会先写入 Runtime EventQueue，HTTP 请求不会直接调用模型。认知 Worker
-领取事件后，用 LangGraph 运行 Director（只输出结构化 `LifeDecision`）；只有当决定需要表达时，
-才把已批准意图交给 Linux 人格推理服务上的**现有 LoRA**。Executor 在单一事务中写入
-LifeEvent、LifeState、消息与下一次 Wakeup。
+领取事件后，由 LangGraph 调度平级的 Director 与 DayPlan；需要表达时交给 PersonaActor。
+所有角色共用认知模型配置，并由 AgentLoopController 执行模型／工具循环。
+当前聊天链路不调用本地 LoRA；独立训练与人格推理服务仍保留，不影响训练资产。
 
-Runtime 仅能从 `world_ready` 的人物世界启动。由于当前 LightRAG 不能按时间过滤，分支的
-`OriginWorldSnapshot` 有意冻结最新完成图谱，并把其最后一个导入 Bundle 的时间记录为 cutoff；
-它不会假装提供历史节点级别的图谱切片。Director 与 PersonaActor 的 system prompt、工具
-schema 和硬上限都集中在 `backend/moonlightbox/runtime_v1/config.py`。
+Runtime 仅能从准备完成的人物世界启动。由于当前 LightRAG 不能按时间过滤，分支使用
+约定的最新完成图谱与背景，而不假装支持历史图谱切片。
 
-Director 以未挂 LoRA 的基座模型做结构化决策，PersonaActor 在同一常驻 Transformers Runtime
-中按需加载已有 PEFT LoRA；二者串行执行，不会同时常驻两份权重。若 Linux GPU 无法加载
-基座或 adapter，推理服务会返回明确的 `inference_failed`，Worker 不会写入半条
-状态或重复消息。
+开发维护入口：
+
+- 行为 Prompt：`backend/moonlightbox/runtime_v1/prompts/<agent>/`；
+- 工具参数和提交检查：各领域 `tools/`，由 LangChain 注册；
+- 单 Agent 策略与网络策略注入：`backend/moonlightbox/agent_runtime/policy.py`；
+- 完整请求容量、压缩、恢复与取消：`agent_runtime/controller.py`；
+- 跨角色总预算：`runtime_v1/config.py`，不再包含 Prompt 或旧 tokenizer 阈值。
+
+Graph Patch、图谱回归评估和 Alias 同样使用统一循环及原生提交工具。
+提交仅产生提案；Profile、Graph 的逐步批准和 Executor 的事务保护仍然保留。
+历史 v1/v2 人物画像可读，修改时先重新生成 v3，不再走旧 Profile Patch 生成器。
 
 ## Docker
 
@@ -209,6 +240,8 @@ Director 以未挂 LoRA 的基座模型做结构化决策，PersonaActor 在同�
 
 ```bash
 cp .env.example .env
+# 生产机建议改成宿主机绝对路径；默认值供 `.worktrees/*` 本地开发共享。
+export MOONLIGHTBOX_HOST_DATA_DIR=/absolute/path/to/moonlightbox-runtime-data
 docker compose up --build
 ```
 
@@ -216,8 +249,9 @@ Compose 会先运行一次 Alembic migration；迁移成功后启动 API、Worke
 `persona-runtime` 与 `training-worker` 使用 `gpus: all`，宿主机需要安装 NVIDIA Container
 Toolkit；二者不会在同一任务中并发加载模型。若使用独立 GPU 节点，可覆盖
 `MOONLIGHTBOX_PERSONA_INFERENCE_URL` 与 token。
-`data/` 和 `models/` 会挂载到 API、migration 和 Worker 容器，其中 SQLite 数据库仅由同一
-宿主机上的这些进程共享。
+worktree 外的共享运行数据目录和 `models/` 会挂载到 API、migration 和 Worker 容器。
+SQLite 数据库、项目媒体与 Chroma 数据因此不会随 worktree 分叉；该目录只应由同一宿主机
+上的这些进程共享。
 
 打开 `http://localhost:8080`。Docker 镜像安装 Linux QLoRA 依赖，GPU 只分配给
 `persona-runtime` 与独立的 `training-worker`；API、实时 Worker 与普通后台 Worker 不会抢占
