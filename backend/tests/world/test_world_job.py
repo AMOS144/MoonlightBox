@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,6 @@ from moonlightbox.world.client import (
     LightRAGRetrieval,
 )
 from moonlightbox.world.jobs import WORLD_BUILD_JOB_KIND, create_world_build_handler
-from moonlightbox.world.schemas import WorldProfileDraft
 
 
 class FakeLightRAG:
@@ -44,6 +44,9 @@ class FakeLightRAG:
             metadata=self.index_documents_metadata,
         )
 
+    def list_entities(self, _workspace: str) -> list[object]:
+        return []
+
     @property
     def index_documents_metadata(self) -> LightRAGMetadata:
         return LightRAGMetadata(
@@ -59,45 +62,90 @@ class FakeLightRAG:
 
 
 class FakeCompiler:
-    def create_structured_completion(self, **_: Any) -> WorldProfileDraft:
-        source = self.source
-        statement = {
-            "text": "在新公司工作",
-            "source_status": "direct",
-            "source_document_ids": [source],
-        }
-        return WorldProfileDraft.model_validate(
-            {
-                "identity": {
-                    "names": [
+    def __init__(self) -> None:
+        self.planned_sections: list[str] = []
+        self.finalized_sections: list[str] = []
+
+    def create_agent_chat_model(self):
+        from langchain_core.messages import AIMessage
+
+        compiler = self
+
+        class NativeModel:
+            def bind_tools(self, tools, **kwargs):
+                return self
+
+            def invoke(self, messages):
+                if not any(item.type == "tool" for item in messages):
+                    task = json.loads(
+                        next(item.content for item in messages if item.type == "human")
+                    )
+                    compiler.planned_sections.append(task["section"])
+                    return AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": "search_world",
+                                "args": {"question": "小月的生活和工作背景"},
+                                "id": "search-1",
+                            }
+                        ],
+                    )
+                from moonlightbox.world.person_world.contracts.profile_v3 import (
+                    SECTION_RESULT_MODELS,
+                )
+
+                task = json.loads(next(item.content for item in messages if item.type == "human"))
+                result = compiler.create_structured_completion(
+                    response_model=SECTION_RESULT_MODELS[task["section"]],
+                    user_content=json.dumps({"task": task}),
+                )
+                from profile_submission_helpers import section_input
+                return AIMessage(
+                    content="",
+                    tool_calls=[
                         {
-                            "text": "小月",
-                            "source_status": "direct",
-                            "source_document_ids": [source],
+                            "name": "submit_section",
+                            "id": "submit",
+                            "args": {"result": section_input(result.model_dump(mode="json"))},
                         }
                     ],
-                    "aliases": [],
-                    "self_descriptions": [],
-                    "roles": [statement],
-                },
-                "work_and_education": [statement],
-                "places": [],
-                "social_relationships": [],
-                "preferences": [],
-                "recurring_activities": [],
-                "routine_summary": {
-                    "workdays": [],
-                    "weekends": [],
-                    "other_patterns": [],
-                },
-                "life_phases": [],
-                "relationship_with_user": {"overview": [], "changes_over_time": []},
-                "important_events": [],
-                "unresolved_candidates": [],
-            }
-        )
+                )
 
-    source: str = ""
+        return NativeModel()
+
+    def create_structured_completion(self, **kwargs: Any) -> Any:
+        response_model = kwargs["response_model"]
+        payload = kwargs.get("user_content", "{}")
+        if response_model.__name__.endswith("_result_v3"):
+            from moonlightbox.world.person_world.contracts.profile_v3 import SECTION_MODELS
+
+            section = json.loads(payload)["task"]["section"]
+            self.finalized_sections.append(section)
+            values = SECTION_MODELS[section]().model_dump(mode="json")
+            values["summary"] = "小月的生活理解"
+            result = response_model(
+                **values,
+                **(
+                    {
+                        "module_assessment": {
+                            "status": "not_identified",
+                            "explanation": "此集成测试只验证导入到批准链路",
+                        },
+                    }
+                    if section == "life_context"
+                    else {}
+                ),
+            )
+            if section == "identity":
+                result.names_and_self_reference.description = "小月"
+                result.names_and_self_reference.status = "described"
+                result.overview = "小月正在适应新公司的工作。"
+            elif section == "life_context":
+                result.primary_engagements.description = "小月在新公司工作"
+                result.primary_engagements.status = "described"
+            return result
+        raise AssertionError(f"Unexpected retired output model: {response_model}")
 
 
 def test_import_builds_world_before_enqueuing_node_analysis(tmp_path: Path) -> None:
@@ -108,6 +156,8 @@ def test_import_builds_world_before_enqueuing_node_analysis(tmp_path: Path) -> N
         model_dir=tmp_path / "models",
         auto_create_schema=True,
         lightrag_enabled=True,
+        # 此断言使用共享的顺序记录 Fake；并发行为由 Coordinator 专属测试覆盖。
+        person_world_section_concurrency=1,
     )
     with TestClient(create_app(settings)) as client:
         project = client.post("/api/projects", json={"name": "人物世界"}).json()
@@ -163,19 +213,24 @@ def test_import_builds_world_before_enqueuing_node_analysis(tmp_path: Path) -> N
         assert Worker(database, registry, allowed_kinds={WORLD_BUILD_JOB_KIND}).run_once()
 
         world_job = client.get(f"/api/jobs/{world_job_id}").json()
-        assert world_job["status"] == "succeeded"
-        analysis_job_id = world_job["checkpoint"]["analysis_job_id"]
-        analysis_job = client.get(f"/api/jobs/{analysis_job_id}").json()
-        assert analysis_job["kind"] == "event_analysis_v3"
-        assert analysis_job["status"] == "queued"
+        assert world_job["status"] == "succeeded", world_job
+        assert world_job["checkpoint"]["stage"] == "world_ready"
+        assert world_job["checkpoint"]["analysis_job_id"]
 
         profile = client.get(f"/api/projects/{project['id']}/world-profile")
-        assert profile.status_code == 200
-        body = profile.json()
-        assert body["identity"]["names"][0]["text"] == "小月"
-        assert body["work_and_education"][0]["text"] == "在新公司工作"
-        assert body["graph"]["lightrag_version"] == "1.5.6"
-        assert body["source_message_ids"]
+        assert profile.status_code == 404
+        candidate = client.get(f"/api/projects/{project['id']}/world-agent/draft")
+        assert candidate.status_code == 404
+        analysis_job = client.get(
+            f"/api/jobs/{world_job['checkpoint']['analysis_job_id']}"
+        ).json()
+        assert analysis_job["kind"] == "node_investigation_turn"
+        assert analysis_job["status"] == "queued"
+        assert fake_compiler.planned_sections == []
+        assert fake_compiler.finalized_sections == []
+        graph = client.get(f"/api/projects/{project['id']}/world-profile/status").json()
+        assert graph["status"] == "ready"
+        assert graph["lightrag_version"] == "1.5.6"
 
         # 前端在编译期间通过世界状态接口读取 Worker checkpoint，而不是
         # 根据本地计时模拟百分比。
@@ -201,15 +256,11 @@ def test_import_builds_world_before_enqueuing_node_analysis(tmp_path: Path) -> N
             session.commit()
         finally:
             session_iterator.close()
-        graph_status = client.get(
-            f"/api/projects/{project['id']}/world-profile/status"
-        )
+        graph_status = client.get(f"/api/projects/{project['id']}/world-profile/status")
         assert graph_status.status_code == 200
         build_progress = graph_status.json()["build_progress"]
         assert build_progress["job_id"]
-        assert {
-            key: value for key, value in build_progress.items() if key != "job_id"
-        } == {
+        assert {key: value for key, value in build_progress.items() if key != "job_id"} == {
             "status": "running",
             "stage": "compiling_profile",
             "progress": 0.75,
@@ -219,11 +270,5 @@ def test_import_builds_world_before_enqueuing_node_analysis(tmp_path: Path) -> N
             "bundle_count": None,
         }
 
-        source_name = fake_lightrag.documents[0].source  # type: ignore[attr-defined]
-        document_id = source_name.removesuffix(".txt")
-        source = client.get(
-            f"/api/projects/{project['id']}/world-profile/sources/{document_id}"
-        ).json()
-        assert [message["id"] for message in source["messages"]] == body["source_message_ids"]
         assert all("message:" not in document.text for document in fake_lightrag.documents)  # type: ignore[attr-defined]
         database.close()

@@ -18,6 +18,7 @@ from moonlightbox.imports.media import (
     normalize_media_path,
 )
 from moonlightbox.imports.models import ImportSource, Message, Participant
+from moonlightbox.imports.types import MessageKind
 from moonlightbox.imports.schemas import (
     ImportConfirm,
     ImportConfirmRead,
@@ -30,6 +31,15 @@ from moonlightbox.imports.wxecho_csv import WxechoCsvImporter
 from moonlightbox.imports.wxecho_json import WxechoJsonImporter
 from moonlightbox.imports.wxecho_txt import WxechoTxtImporter
 from moonlightbox.media.service import MediaStore
+
+
+def person_candidates(messages):
+    """系统通知保留在原始记录中，但不参与真人角色绑定。"""
+    return list(dict.fromkeys(
+        message.sender for message in messages
+        if message.kind != MessageKind.SYSTEM
+        and message.sender.strip().casefold() not in {"系统", "system"}
+    ))
 
 
 class UnsupportedImportFormatError(ValueError):
@@ -78,7 +88,7 @@ class ImportService:
         return ImportPreviewRead(
             id=preview_id,
             message_count=len(messages),
-            participants=list(dict.fromkeys(message.sender for message in messages)),
+            participants=person_candidates(messages),
             time_range=(min(timestamps), max(timestamps)) if timestamps else None,
             kind_counts=dict(Counter(message.kind.value for message in messages)),
             sample_messages=[
@@ -153,7 +163,7 @@ class ImportService:
         result = self._select_importer(source_path).parse(source_path)
         participant_names = set(message.sender for message in result.messages)
         selected = {request.self_participant, request.target_participant}
-        if len(selected) != 2 or not selected.issubset(participant_names):
+        if len(selected) != 2 or not selected.issubset(set(person_candidates(result.messages))):
             raise ValueError("角色映射必须对应两个不同的聊天参与者")
 
         source = ImportSource(

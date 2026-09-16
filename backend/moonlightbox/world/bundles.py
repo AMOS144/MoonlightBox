@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from moonlightbox.imports.message_order import message_order_key
+
 
 @dataclass(frozen=True)
 class WorldMessage:
@@ -17,6 +19,15 @@ class WorldMessage:
     timestamp: datetime
     kind: str
     content: str
+    source_id: str = ""
+
+
+def chronological_source_order(messages: list[WorldMessage]) -> dict[str, int]:
+    """独立于旧 Bundle 的文本顺序，严格对齐起点调查的冻结消息清单。"""
+    ordered = sorted(
+        messages, key=lambda m: message_order_key(m.timestamp, m.import_id, m.source_id, m.id)
+    )
+    return {message.id: index for index, message in enumerate(ordered)}
 
 
 @dataclass(frozen=True)
@@ -43,6 +54,29 @@ class ConversationBundleDocument:
     @property
     def carry_in_message_count(self) -> int:
         return sum(item.is_carry_in for item in self.messages)
+
+    def source_spans(self, source_order: dict[str, int]) -> list[dict[str, object]]:
+        """在冻结文本生成处记录位置；保留清洗后的真实文本和原始消息 ID。"""
+        spans = []
+        cursor = 0
+        rendered = []
+        for item in self.messages:
+            message = item.message
+            line = render_world_message(message)
+            spans.append(
+                {
+                    "message_id": message.id,
+                    "source_ordinal": source_order[message.id],
+                    "sent_at": message.timestamp.isoformat(),
+                    "start": cursor,
+                    "end": cursor + len(line),
+                }
+            )
+            rendered.append(line)
+            cursor += len(line) + 1
+        if "\n".join(rendered) != self.content:
+            raise ValueError("冻结 Bundle 与消息渲染不一致，不能发布来源位置")
+        return spans
 
 
 def match_bundle_document_reference(file_path: str, allowed_sources: set[str]) -> str | None:

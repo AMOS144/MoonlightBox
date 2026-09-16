@@ -1,266 +1,234 @@
-"""LangGraph Director：模型只产出结构化 LifeDecision，写入仍交给 Executor。"""
+"""Director 的领域适配；模型与工具链路由 Phoenix 观测。"""
 
 from __future__ import annotations
 
 import json
-from time import monotonic
-from typing import Any, Protocol, TypedDict
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
-from langgraph.graph import END, START, StateGraph
 
-from .config import (
-    DIRECTOR_SYSTEM_PROMPT,
-    MAX_DIRECTOR_STEPS,
-    MAX_TOOL_CALLS,
-    MAX_TOOL_DEADLINE_SECONDS,
-    MAX_TOOL_TOKENS,
+from moonlightbox.agent_runtime import (
+    AgentLoopController,
+    AgentSpec,
+    RunScope,
 )
+from moonlightbox.agent_runtime.contracts import AgentExecutionRequest, ChatModel
+from moonlightbox.agent_runtime.policy import (
+    DIRECTOR_RUNTIME_POLICY,
+    AgentRuntimePolicy,
+    controller_budget,
+)
+from moonlightbox.agent_runtime.skills import build_skill_tool
+from moonlightbox.agent_runtime.tool_dispatch import build_execute_tool
+
+from .agent_catalog import load_agent_definition, select_declared_tools
+from .agent_support import (
+    RuntimeToolbox,
+    prompt_hash,
+)
+from .context_views import director_context_payload
+from .expression_profile import expression_material
+from .prompting import assemble_agent_prompt
 from .schemas import ContextPacket, LifeDecision
+from .tools.submit_decision import build_submit_decision_tool
+from .tools.submit_expression import ExpressionSubmission
 
 
-class DirectorModel(Protocol):
-    """兼容 LangChain ChatModel 的最小接口，方便注入现有 LoRA/云模型。"""
-
-    def invoke(self, messages: list[Any]) -> Any: ...
-
-
-class DirectorLoopState(TypedDict, total=False):
-    messages: list[Any]
-    packet: dict[str, Any]
-    tool: BaseTool | None
-    model: DirectorModel | None
-    output: Any
-    decision: LifeDecision | None
-    model_steps: int
-    tool_calls: int
-    tool_tokens: int
-    repeated_call_count: int
-    last_fingerprint: str | None
-    no_progress_count: int
-    tool_error_count: int
-    started_at: float
+@dataclass(frozen=True)
+class DirectorRun:
+    decision: LifeDecision
     terminal_reason: str
+    asset_sources: dict | None = None
 
 
 class DirectorAgent:
-    """受硬上限保护的 Director 图；模型不可直接访问数据库。"""
+    """将 ContextPacket 转为 AgentSpec；没有数据库或业务写入权限。"""
 
-    def __init__(self, model: DirectorModel | None = None) -> None:
+    def initialize_branch(self, session, **kwargs):
+        """独立起点任务，不复用普通 Director 的消息列表。"""
+        from .initialization import initialize_director
+
+        return initialize_director(self, session, **kwargs)
+
+    def __init__(
+        self,
+        model: ChatModel | None = None,
+        *,
+        runtime_policy: AgentRuntimePolicy | None = None,
+        controller: AgentLoopController | None = None,
+    ) -> None:
         self.model = model
+        self.runtime_policy = runtime_policy or DIRECTOR_RUNTIME_POLICY
+        self.controller = controller or AgentLoopController()
 
     def run(self, packet: ContextPacket, *, search_tool: BaseTool | None = None) -> LifeDecision:
-        if packet.budgets.get("budget_exceeded") or self.model is None:
-            return _safe_wait(packet, "模型不可用或上下文超过硬上限")
-        graph = self._build_graph(search_tool)
-        result = graph.invoke(
-            {
-                "packet": packet.model_dump(mode="json"),
-                "messages": [
-                    SystemMessage(content=DIRECTOR_SYSTEM_PROMPT),
-                    HumanMessage(
-                        content=_runtime_context_message(packet)
-                    ),
-                ],
-                "tool": search_tool,
-                "model": self.model,
-                "model_steps": 0,
-                "tool_calls": 0,
-                "tool_tokens": 0,
-                "repeated_call_count": 0,
-                "last_fingerprint": None,
-                "no_progress_count": 0,
-                "tool_error_count": 0,
-                "started_at": monotonic(),
-            }
-        )
-        decision = result.get("decision")
-        return (
-            decision
-            if isinstance(decision, LifeDecision)
-            else _safe_wait(packet, "Director 输出无法解析")
-        )
+        return self.run_with_trace(packet, search_tool=search_tool).decision
 
-    def _build_graph(self, search_tool: BaseTool | None) -> Any:
-        graph = StateGraph(DirectorLoopState)
-        graph.add_node("director_model", self._director_node)
-        graph.add_node("tool_node", self._tool_node)
-        graph.add_node("force_final", self._force_final_node)
-        graph.add_edge(START, "director_model")
-        graph.add_conditional_edges(
-            "director_model",
-            self._should_continue,
-            {"tool": "tool_node", "final": END, "force_final": "force_final"},
-        )
-        graph.add_edge("tool_node", "director_model")
-        graph.add_edge("force_final", END)
-        return graph.compile()
-
-    def _director_node(self, state: DirectorLoopState) -> dict[str, Any]:
-        model = state.get("model")
-        if model is None:
-            return {
-                "decision": _safe_wait_from_payload(state["packet"], "模型不可用"),
-                "terminal_reason": "invalid_output",
-            }
-        bound = model
-        tool = state.get("tool")
-        bind_tools = getattr(model, "bind_tools", None)
-        if tool is not None and callable(bind_tools):
-            bound = bind_tools([tool], strict=True)
-        try:
-            output = bound.invoke(state["messages"])
-        except Exception:
-            return {
-                "output": None,
-                "model_steps": state.get("model_steps", 0) + 1,
-                "terminal_reason": "model_error",
-            }
-        messages = list(state["messages"])
-        messages.append(output)
-        decision = _parse_decision(output)
-        return {
-            "messages": messages,
-            "output": output,
-            "decision": decision,
-            "model_steps": state.get("model_steps", 0) + 1,
-        }
-
-    def _tool_node(self, state: DirectorLoopState) -> dict[str, Any]:
-        tool = state.get("tool")
-        output = state.get("output")
-        if tool is None or not isinstance(output, AIMessage) or not output.tool_calls:
-            return {"terminal_reason": "invalid_output"}
-        messages = list(state["messages"])
-        calls = state.get("tool_calls", 0)
-        tokens = state.get("tool_tokens", 0)
-        repeated = state.get("repeated_call_count", 0)
-        no_progress = state.get("no_progress_count", 0)
-        errors = state.get("tool_error_count", 0)
-        last = state.get("last_fingerprint")
-        for call in output.tool_calls:
-            if calls >= MAX_TOOL_CALLS:
-                break
-            args = call.get("args", {})
-            fingerprint = json.dumps(args, sort_keys=True, ensure_ascii=False)
-            if fingerprint == last:
-                repeated += 1
-            else:
-                repeated = 0
-            if repeated >= 2:
-                break
-            try:
-                result = tool.invoke(args)
-            except Exception as error:
-                result = {"tool_name": "search_memory", "error": str(error), "source_ids": []}
-                errors += 1
-            serialized = json.dumps(result, ensure_ascii=False)
-            tokens += max(1, len(serialized) // 4)
-            source_ids = result.get("source_ids", []) if isinstance(result, dict) else []
-            if not source_ids:
-                no_progress += 1
-            else:
-                no_progress = 0
-            messages.append(
-                ToolMessage(
-                    content=f"<tool_results>{serialized[:6000]}</tool_results>",
-                    tool_call_id=call.get("id", "tool"),
-                )
+    def run_with_trace(
+        self,
+        packet: ContextPacket,
+        *,
+        search_tool: BaseTool | None = None,
+        recent_life_tool: BaseTool | None = None,
+        context_tools: list[BaseTool] | None = None,
+        skill_tools: list[BaseTool] | None = None,
+        owner_id: str | None = None,
+        project_id: str | None = None,
+        input_revision: int = 1,
+        input_revision_resolver: Callable[[], int | None] | None = None,
+        reference_validator: Callable[[LifeDecision], str | None] | None = None,
+        cancellation_requested: Callable[[], bool] | None = None,
+        receive_inputs=None,
+        asset_validator=None,
+        on_status: Callable[[dict[str, Any]], None] | None = None,
+    ) -> DirectorRun:
+        if self.model is None:
+            return DirectorRun(
+                decision=_safe_wait(packet, "模型不可用"),
+                terminal_reason="guard",
             )
-            calls += 1
-            last = fingerprint
-        return {
-            "messages": messages,
-            "tool_calls": calls,
-            "tool_tokens": tokens,
-            "repeated_call_count": repeated,
-            "last_fingerprint": last,
-            "no_progress_count": no_progress,
-            "tool_error_count": errors,
-        }
-
-    def _should_continue(self, state: DirectorLoopState) -> str:
-        output = state.get("output")
-        if isinstance(state.get("decision"), LifeDecision):
-            return "final"
-        if state.get("model_steps", 0) >= MAX_DIRECTOR_STEPS:
-            return "force_final"
-        if state.get("tool_calls", 0) >= MAX_TOOL_CALLS:
-            return "force_final"
-        if state.get("tool_tokens", 0) >= MAX_TOOL_TOKENS:
-            return "force_final"
-        if monotonic() - state.get("started_at", monotonic()) >= MAX_TOOL_DEADLINE_SECONDS:
-            return "force_final"
-        if state.get("tool_error_count", 0) > 2:
-            return "force_final"
-        if state.get("no_progress_count", 0) >= 2:
-            return "force_final"
-        if state.get("terminal_reason") in {"model_error", "invalid_output"}:
-            return "force_final"
-        if isinstance(output, AIMessage) and output.tool_calls and state.get("tool") is not None:
-            if state.get("repeated_call_count", 0) >= 2:
-                return "force_final"
-            return "tool"
-        return "force_final"
-
-    def _force_final_node(self, state: DirectorLoopState) -> dict[str, Any]:
-        # 再给模型一次无工具机会；失败时由代码安全等待。
-        model = state.get("model")
-        if model is not None:
-            try:
-                output = model.invoke(
-                    [
-                        SystemMessage(content=DIRECTOR_SYSTEM_PROMPT),
-                        *state["messages"],
-                        HumanMessage(
-                            content="TOOL_BUDGET_EXHAUSTED：仅依据已有证据输出 LifeDecision JSON。"
-                        ),
-                    ]
-                )
-                decision = _parse_decision(output)
-                if decision is not None:
-                    return {"decision": decision, "terminal_reason": "budget"}
-            except Exception:
-                pass
-        return {
-            "decision": _safe_wait_from_payload(state["packet"], "Director 循环达到安全上限"),
-            "terminal_reason": "budget",
-        }
-
-
-def _parse_decision(output: Any) -> LifeDecision | None:
-    content = output.content if isinstance(output, AIMessage) else output
-    if isinstance(content, list):
-        content = "".join(
-            item.get("text", "") if isinstance(item, dict) else str(item) for item in content
+        tools = [
+            build_skill_tool(
+                Path(__file__).with_name("skills"),
+                business_tools=tuple(skill_tools or []),
+                skill_contexts={
+                    "speaking": expression_material(packet.origin.get("person_world_profile"))
+                },
+            )
+        ]
+        if search_tool is not None:
+            tools.append(search_tool)
+        if recent_life_tool is not None:
+            tools.append(recent_life_tool)
+        toolbox = RuntimeToolbox(self.runtime_policy)
+        tools.extend(context_tools or [])
+        definition = load_agent_definition("director")
+        registered = toolbox.register(select_declared_tools(definition, tools))
+        registered += (
+            build_execute_tool(tuple(toolbox.register_one(t) for t in skill_tools or [])),
         )
-    if isinstance(content, dict):
-        try:
-            return LifeDecision.model_validate(content)
-        except Exception:
-            return None
-    if not isinstance(content, str):
-        return None
-    try:
-        # JSON 输入用 model_validate_json，确保 ISO 时间字符串按协议解析；
-        # dict 输入则保留给真实 LangChain structured output 的 Python 值。
-        return LifeDecision.model_validate_json(content)
-    except (ValueError, TypeError):
-        return None
+        submission = ExpressionSubmission({}, asset_validator=asset_validator)
+        registered += (build_submit_decision_tool(packet, reference_validator, submission),)
+        assembly = assemble_agent_prompt(
+            "director", LifeDecision, tools=registered, submission_tool_name="submit_decision"
+        )
+        prompt = assembly.text
+        read_ids = []
+
+        def restore_inputs(work):
+            nonlocal read_ids
+            read_ids = list(work.get("input_event_ids", []))
+            if receive_inputs is not None and work.get("packet") is not None:
+                restored = ContextPacket.model_validate(work["packet"])
+                receive_inputs(read_ids, restored)
+                for key in type(packet).model_fields:
+                    setattr(packet, key, getattr(restored, key))
+
+        def refresh_inputs(messages):
+            nonlocal read_ids
+            # 输入游标随首轮任务消息进入检查点，压缩时同样保留；不是新的持久化实体。
+            first = next(
+                i for i, message in enumerate(messages) if isinstance(message, HumanMessage)
+            )
+            anchor = messages[first]
+            ids = list(read_ids)
+            previous_ids = list(ids)
+            if receive_inputs is not None:
+                updated, ids = receive_inputs(ids)
+                for key in type(packet).model_fields:
+                    setattr(packet, key, getattr(updated, key))
+            read_ids = list(ids)
+            if previous_ids == read_ids and anchor.additional_kwargs.get(
+                "runtime_input_initialized"
+            ):
+                # 没有新输入就保留压缩后的上下文，不能每轮把大包重新展开。
+                return list(messages)
+            messages = list(messages)
+            messages[first] = anchor.model_copy(
+                update={
+                    "content": _runtime_context_message(packet),
+                    "additional_kwargs": {
+                        **anchor.additional_kwargs,
+                        "runtime_input_event_ids": ids,
+                        "runtime_input_initialized": True,
+                    },
+                }
+            )
+            return messages
+
+        spec = AgentSpec(
+            name="director",
+            prompt_version=prompt_hash(prompt),
+            submission_tool_name="submit_decision",
+            budget=controller_budget(self.runtime_policy),
+            tools=registered,
+            context_compactor=toolbox.compact,
+            restore_tool_results=lambda results: (
+                toolbox.restore(results),
+                submission.restore(results),
+            ),
+            refresh_inputs=refresh_inputs if receive_inputs is not None else None,
+            snapshot_work_state=(
+                lambda: {
+                    "input_event_ids": read_ids,
+                    "packet": packet.model_dump(mode="json"),
+                }
+            )
+            if receive_inputs is not None
+            else None,
+            restore_work_state=restore_inputs if receive_inputs is not None else None,
+        )
+        outcome = self.controller.run(
+            spec=spec,
+            request=AgentExecutionRequest(
+                owner_type="runtime_cycle",
+                cancellation_requested=cancellation_requested,
+                on_status=on_status,
+                owner_id=owner_id or str(packet.branch.get("branch_id", "runtime")),
+                project_id=project_id,
+                input_revision=input_revision,
+                scope=RunScope(
+                    project_id=project_id,
+                    branch_id=str(packet.branch.get("branch_id", "")) or None,
+                    allowed_source_snapshot_id=str(packet.origin.get("snapshot_id", "")) or None,
+                    permissions=frozenset(
+                        {"runtime.read_memory", "runtime.read_style", "runtime.send_agent_message"}
+                    ),
+                ),
+                messages=(
+                    assembly.message(),
+                    HumanMessage(content=_runtime_context_message(packet)),
+                ),
+                input_revision_resolver=input_revision_resolver,
+            ),
+            model=self.model,
+        )
+        decision = outcome.value
+        return DirectorRun(
+            decision=decision
+            if isinstance(decision, LifeDecision)
+            else _safe_wait(packet, outcome.terminal_reason),
+            terminal_reason="decision"
+            if outcome.terminal_reason == "success"
+            else outcome.terminal_reason,
+            asset_sources=dict(submission.authorized),
+        )
 
 
 def _safe_wait(packet: ContextPacket, reason: str) -> LifeDecision:
-    return _safe_wait_from_payload(packet.model_dump(mode="json"), reason)
-
-
-def _safe_wait_from_payload(packet: dict[str, Any], reason: str) -> LifeDecision:
     return LifeDecision(action="wait", private_reason=reason[:500])
 
 
 def _runtime_context_message(packet: ContextPacket) -> str:
-    """固定标记 ContextPacket，避免运行数据和 system 规则混在同一段文本。"""
-
-    return "<runtime_context>" + json.dumps(
-        packet.model_dump(mode="json"), ensure_ascii=False
-    ) + "</runtime_context>"
+    return (
+        "<runtime_context>"
+        + json.dumps(
+            director_context_payload(packet),
+            ensure_ascii=False,
+        )
+        + "</runtime_context>"
+    )

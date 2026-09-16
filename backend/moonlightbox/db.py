@@ -33,6 +33,9 @@ class Database:
         busy_timeout_ms: int = 1000,
         lock_retries: int = 2,
     ) -> None:
+        from moonlightbox.model_registry import register_models
+
+        register_models()
         if busy_timeout_ms < 0:
             raise ValueError("busy_timeout_ms 不能为负数")
         if lock_retries < 0:

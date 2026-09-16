@@ -23,8 +23,15 @@ _BLOCKING_SAFETY_TAGS = frozenset(
 
 
 class MediaStore:
-    def __init__(self, data_dir: Path) -> None:
+    def __init__(
+        self,
+        data_dir: Path,
+        *,
+        read_only_source_dir: Path | None = None,
+    ) -> None:
         self._data_dir = data_dir
+        # 仅在读取缺失的旧媒体时回退；save() 从不使用这个目录。
+        self._read_only_source_dir = read_only_source_dir
 
     def save(
         self,
@@ -65,9 +72,23 @@ class MediaStore:
         return asset
 
     def path_for(self, asset: MediaAsset) -> Path:
-        candidate = (self._data_dir / asset.relative_path).resolve()
-        root = self._data_dir.resolve()
-        if not candidate.is_relative_to(root):
+        candidate = self._resolve_media_path(self._data_dir, asset.relative_path)
+        if candidate.is_file() or self._read_only_source_dir is None:
+            return candidate
+
+        # 隔离体验库通常只复制数据库；源目录只作为不可写的读取兜底，避免破图，
+        # 同时保证新导入或新生成的媒体仍保存到当前 data_dir。
+        fallback = self._resolve_media_path(
+            self._read_only_source_dir,
+            asset.relative_path,
+        )
+        return fallback if fallback.is_file() else candidate
+
+    @staticmethod
+    def _resolve_media_path(root: Path, relative_path: str) -> Path:
+        candidate = (root / relative_path).resolve()
+        resolved_root = root.resolve()
+        if not candidate.is_relative_to(resolved_root):
             raise ValueError("媒体路径越界")
         return candidate
 

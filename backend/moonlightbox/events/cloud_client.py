@@ -14,6 +14,16 @@ from typing import Any, Literal, Self, TypeVar
 import httpx
 from pydantic import BaseModel, SecretStr, ValidationError
 
+from moonlightbox.agent_runtime.resilience import managed, model_request, request_timeout
+from moonlightbox.observability import (
+    add_context_snapshot,
+    current_agent_execution_trace_context,
+    llm_span,
+    record_span_attributes,
+    record_span_output,
+)
+from moonlightbox.observability.trace_summary import record_external_provider_call
+
 logger = logging.getLogger(__name__)
 
 
@@ -135,6 +145,8 @@ def _to_openai_strict_schema(value: Mapping[str, Any]) -> dict[str, Any]:
         if key in _STABLE_STRICT_SCHEMA_KEYS
     }
     properties = normalized.get("properties")
+    if "const" in value:
+        normalized["enum"] = [_copy_schema_value(value["const"])]
     if normalized.get("type") == "object" or isinstance(properties, Mapping):
         object_properties = properties if isinstance(properties, Mapping) else {}
         normalized["additionalProperties"] = False
@@ -162,6 +174,48 @@ def _contains_open_map(schema: Mapping[str, Any]) -> bool:
     ):
         return True
     return False
+
+
+def _normalize_tagged_unions(source: Mapping[str, Any]) -> dict[str, Any]:
+    """将互斥标签联合转换为供应商支持的 anyOf；普通 oneOf 不降级。
+
+    Pydantic 用 discriminator + oneOf 表达模块 kind/心理维度。
+    当各分支标签值不相交且标签必填时，anyOf 与 oneOf 等价。
+    """
+    from copy import deepcopy
+
+    root = deepcopy(dict(source))
+
+    def visit(node):
+        if isinstance(node, list):
+            for child in node:
+                visit(child)
+        elif isinstance(node, dict):
+            discriminator = node.get("discriminator", {})
+            tag = discriminator.get("propertyName") if isinstance(discriminator, dict) else None
+            alternatives = node.get("oneOf")
+            if tag and isinstance(alternatives, list):
+                variants, seen = [], set()
+                for alternative in alternatives:
+                    variant = _resolve_local_schema_ref(alternative, root)
+                    field = variant.get("properties", {}).get(tag, {})
+                    values = [field["const"]] if "const" in field else field.get("enum", [])
+                    if not values or seen.intersection(values):
+                        break
+                    seen.update(values)
+                    variants.append(variant)
+                else:
+                    for variant in variants:
+                        variant["required"] = list(
+                            dict.fromkeys([*variant.get("required", []), tag])
+                        )
+                    node["anyOf"] = node.pop("oneOf")
+                    node.pop("discriminator", None)
+            for child in list(node.values()):
+                visit(child)
+
+    visit(root)
+    return root
 
 
 def _contains_unrepresentable_structure(schema: Mapping[str, Any]) -> bool:
@@ -241,6 +295,8 @@ def _minimal_json_example(
             visited_refs=visited_refs | {reference},
         )
 
+    if "const" in schema:
+        return _copy_schema_value(schema["const"])
     enum = schema.get("enum")
     if isinstance(enum, list) and enum:
         return _copy_schema_value(enum[0])
@@ -321,6 +377,28 @@ def _minimal_json_example(
 
 
 class NodeAnalysisCloudClient:
+    def create_agent_chat_model(self, *, sensitive_handler=None):
+        """将同一认知模型配置提供给原生工具 Agent，保留思考字段与统一 Phoenix 链路。
+
+        不从全局环境另选模型，不复制 key；HTTP 生命周期仍由本客户端管理。
+        工具 Schema 由 LangChain bind_tools 注册，循环由 AgentLoopController 管理。
+        sensitive_handler 可选：云端风控拒绝时由它做最小遮罩降级。
+        """
+        from moonlightbox.runtime_v1.cloud_models import RuntimeCloudChatModel, RuntimeCloudClient
+
+        client = RuntimeCloudClient(
+            endpoint=self._endpoint,
+            model=self._model,
+            api_key=self._api_key.get_secret_value() if self._api_key else None,
+            timeout_seconds=self._timeout_seconds,
+            thinking_mode=self._thinking_mode,
+            max_output_tokens=self._max_output_tokens,
+            max_retries=self._max_retries,
+            client=self._client,
+            cancellable_http=self._owns_client,
+        )
+        return RuntimeCloudChatModel(client, temperature=0.3, sensitive_handler=sensitive_handler)
+
     def __init__(
         self,
         *,
@@ -334,7 +412,9 @@ class NodeAnalysisCloudClient:
         max_backoff_seconds: float = 60.0,
         max_retry_after_seconds: float = 3600.0,
         response_format: Literal["json_schema", "json_object"] = "json_schema",
-        thinking_mode: Literal["default", "disabled"] = "disabled",
+        # 这是所有结构化调查 Agent 的底层默认值；调用方没有显式覆盖时也不能静默
+        # 关闭推理。批处理若真需要低延迟，必须显式传入 disabled。
+        thinking_mode: Literal["default", "disabled"] = "default",
         max_output_tokens: int = 8192,
         client: httpx.Client | None = None,
         sleep: Callable[[float], None] = time.sleep,
@@ -401,8 +481,11 @@ class NodeAnalysisCloudClient:
         if self._response_format != "json_object":
             return 0
         source_schema = response_model.model_json_schema() if json_schema is None else json_schema
+        if isinstance(source_schema, Mapping):
+            source_schema = _normalize_tagged_unions(source_schema)
         return len("\n\n" + self._json_object_instruction(source_schema))
 
+    @model_request
     def create_structured_completion(
         self,
         *,
@@ -415,6 +498,10 @@ class NodeAnalysisCloudClient:
         run_id: str | None = None,
         max_prompt_chars: int | None = None,
         thinking_mode_override: Literal["default", "disabled"] | None = None,
+        max_output_tokens: int | None = None,
+        request_timeout_seconds: float | None = None,
+        request_max_retries: int | None = None,
+        include_minimal_example: bool = True,
     ) -> ResponseModel:
         context = self._safe_context(
             operation_id=operation_id,
@@ -423,6 +510,8 @@ class NodeAnalysisCloudClient:
         )
         self._ensure_configured(context)
         source_schema = response_model.model_json_schema() if json_schema is None else json_schema
+        if isinstance(source_schema, Mapping):
+            source_schema = _normalize_tagged_unions(source_schema)
         if _contains_boolean_schema(source_schema):
             raise NodeAnalysisCloudError(
                 NodeAnalysisCloudErrorCode.INVALID_RESPONSE,
@@ -456,6 +545,7 @@ class NodeAnalysisCloudClient:
             system_content = self._with_json_schema_instruction(
                 system_content,
                 source_schema,
+                include_example=include_minimal_example,
             )
         messages = [
             {"role": "system", "content": system_content},
@@ -471,11 +561,30 @@ class NodeAnalysisCloudClient:
                 context=context,
                 diagnostic={"configuration": "prompt_budget_exceeded"},
             )
+        effective_max_output_tokens = (
+            self._max_output_tokens if max_output_tokens is None else max_output_tokens
+        )
+        effective_timeout_seconds = (
+            self._timeout_seconds if request_timeout_seconds is None else request_timeout_seconds
+        )
+        effective_max_retries = (
+            self._max_retries if request_max_retries is None else request_max_retries
+        )
+        if managed():
+            effective_timeout_seconds = request_timeout(effective_timeout_seconds)
+            effective_max_retries = 0
+        if not 0 < effective_max_output_tokens <= 65536:
+            raise ValueError("max_output_tokens 必须在 1 到 65536 之间")
+        if not 0 < effective_timeout_seconds <= 7200:
+            raise ValueError("request_timeout_seconds 必须在 0 到 7200 秒之间")
+        if not 0 <= effective_max_retries <= 10:
+            raise ValueError("request_max_retries 必须在 0 到 10 之间")
+
         request_body: dict[str, Any] = {
             "model": self._model,
             "messages": messages,
             "temperature": 0,
-            "max_tokens": self._max_output_tokens,
+            "max_tokens": effective_max_output_tokens,
             "response_format": (
                 {"type": "json_object"}
                 if self._response_format == "json_object"
@@ -490,67 +599,159 @@ class NodeAnalysisCloudClient:
             ),
         }
         effective_thinking_mode = thinking_mode_override or self._thinking_mode
-        if self._is_deepseek and effective_thinking_mode == "disabled":
+        # MiniMax M3 也支持 ``thinking: {type: disabled}``。此前这里只处理了
+        # DeepSeek，导致 M3 即使环境明确设为 disabled，仍会把整个 completion
+        # 预算消耗在 reasoning 中，最终拿不到可解析的结构化 JSON。
+        if (self._is_deepseek or self._is_minimax_m3) and effective_thinking_mode == "disabled":
             request_body["thinking"] = {"type": "disabled"}
         if self._is_minimax:
+            # MiniMax M3 的 OpenAI 兼容接口以 max_completion_tokens 表示完整
+            # completion（思考 + 正文）预算。max_tokens 在部分网关虽可兼容，
+            # 却会产生版本相关的截断语义；统一改用 M3 的原生字段。
+            request_body.pop("max_tokens")
+            request_body["max_completion_tokens"] = effective_max_output_tokens
             request_body["reasoning_split"] = True
 
-        response, attempts = self._post_with_retries(request_body, context)
-        payload = self._extract_content(response, context, attempts)
-        try:
-            if isinstance(payload, str):
-                # MiniMax 在 reasoning_split 模式下偶尔会把合法 JSON 包在
-                # ```json``` 或 <think>...</think> 外壳里。先去掉这些传输层
-                # 包装，再交给 Pydantic 做唯一的结构校验；不能靠正则修补
-                # JSON 字段内容，否则会把模型的语义错误掩盖掉。
-                return response_model.model_validate_json(
-                    _unwrap_json_content(payload), strict=True
-                )
-            return response_model.model_validate(payload, strict=True)
-        except ValidationError as error:
-            # 保留最小诊断，便于定位第三方模型返回的字段偏差；不记录完整
-            # 聊天上下文或 API 密钥。调用方仍收到统一的 INVALID_RESPONSE。
-            logger.warning(
-                "structured completion validation failed operation=%s model=%s errors=%s payload_type=%s",
-                context.get("operation_id", ""),
-                self._model,
-                error.errors(include_url=False)[:8],
-                type(payload).__name__,
+        # 这是结构化编译器真正向供应商发出的请求。外层 Agent decision Span 用于说明
+        # 为什么走到这里；本 Span 则保存精确 prompt/schema、重试数与供应商 usage，
+        # 让一轮中可能发生的 Schema 修复不再变成 Phoenix 黑盒。
+        with llm_span(
+            "moonlightbox.provider.structured_completion",
+            model_name=self._model,
+            input_value={"messages": messages, "response_schema": source_schema},
+            attributes={
+                "moonlightbox.provider": "cognition",
+                "moonlightbox.provider.operation_id": context.get("operation_id", ""),
+                "moonlightbox.provider.response_model": response_model.__name__,
+                "moonlightbox.provider.thinking_mode": effective_thinking_mode,
+                "moonlightbox.provider.max_output_tokens": effective_max_output_tokens,
+                "moonlightbox.provider.request_timeout_seconds": effective_timeout_seconds,
+            },
+        ) as span:
+            add_context_snapshot(span, event_name="provider_request", value=request_body)
+            response, attempts = self._post_with_retries(
+                request_body,
+                context,
+                timeout_seconds=effective_timeout_seconds,
+                max_retries=effective_max_retries,
             )
+            try:
+                response_body: object = response.json()
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                response_body = {}
+            add_context_snapshot(
+                span,
+                event_name="provider_response",
+                value=response_body,
+            )
+            _record_structured_completion_usage(
+                span=span,
+                response_body=response_body,
+                model_name=self._model,
+                operation_id=context.get("operation_id"),
+                attempts=attempts,
+            )
+            payload = self._extract_content(response, context, attempts)
+            try:
+                if isinstance(payload, str):
+                    # MiniMax 在 reasoning_split 模式下偶尔会把合法 JSON 包在
+                    # ```json``` 或 <think>...</think> 外壳里。先去掉这些传输层
+                    # 包装，再交给 Pydantic 做唯一的结构校验；不能靠正则修补
+                    # JSON 字段内容，否则会把模型的语义错误掩盖掉。
+                    parsed = response_model.model_validate_json(
+                        _unwrap_json_content(payload), strict=True
+                    )
+                else:
+                    parsed = response_model.model_validate(payload, strict=True)
+            except ValidationError as error:
+                # 保留最小诊断，便于定位第三方模型返回的字段偏差；不记录完整
+                # 聊天上下文或 API 密钥。调用方仍收到统一的 INVALID_RESPONSE。
+                logger.warning(
+                    (
+                        "structured completion validation failed operation=%s model=%s "
+                        "errors=%s payload_type=%s"
+                    ),
+                    context.get("operation_id", ""),
+                    self._model,
+                    error.errors(include_url=False)[:8],
+                    type(payload).__name__,
+                )
+                # 调用方只需要知道“哪个结构约束没有满足”。这个有界诊断用于同一模型
+                # 的一次 Schema 修复提示；完整原始响应已仅记录在本机 Phoenix 快照。
+                compact_errors = error.errors(include_url=False)[:5]
+                paths = [
+                    ".".join(str(part) for part in item.get("loc", ()))[:180]
+                    for item in compact_errors
+                    if isinstance(item, Mapping)
+                ]
+                types = [
+                    str(item.get("type", "invalid"))[:80]
+                    for item in compact_errors
+                    if isinstance(item, Mapping)
+                ]
+                validation_diagnostic: dict[str, str | int | bool] = {
+                    **self._safe_response_metadata(response_body, response.status_code),
+                    "validation_error_count": len(error.errors(include_url=False)),
+                    "validation_error_paths": ",".join(paths),
+                    "validation_error_types": ",".join(types),
+                    "validation_error_messages": "; ".join(
+                        str(item.get("msg", ""))[:1200] for item in compact_errors
+                    ),
+                }
+            else:
+                record_span_output(span, parsed)
+                add_context_snapshot(span, event_name="provider_parsed_output", value=parsed)
+                return parsed
         raise NodeAnalysisCloudError(
             NodeAnalysisCloudErrorCode.INVALID_RESPONSE,
             attempts=attempts,
             context=context,
-            diagnostic={"http_status": response.status_code},
+            diagnostic=validation_diagnostic,
         )
 
     def _post_with_retries(
         self,
         request_body: Mapping[str, Any],
         context: Mapping[str, str],
+        *,
+        timeout_seconds: float,
+        max_retries: int,
     ) -> tuple[httpx.Response, int]:
-        for attempt in range(self._max_retries + 1):
+        from moonlightbox.agent_runtime.capacity import check_request, observe_usage
+
+        for attempt in range(max_retries + 1):
             terminal_error: NodeAnalysisCloudErrorCode | None = None
             terminal_diagnostic: dict[str, str | int] = {}
             try:
-                response = self._client.post(
+                from moonlightbox.observability.provider import observed_post
+
+                sample = check_request(request_body, self._endpoint)
+                response = observed_post(
+                    self._client,
                     self._endpoint,
+                    cancellable=self._owns_client,
+                    attempt=attempt + 1,
                     headers={"Authorization": f"Bearer {self._api_key_value()}"},
                     json=request_body,
-                    timeout=self._timeout_seconds,
+                    timeout=request_timeout(timeout_seconds),
                 )
+                if response.is_success:
+                    try:
+                        observe_usage(sample, response.json())
+                    except ValueError:
+                        pass
             except httpx.InvalidURL as error:
                 terminal_diagnostic = {"exception_type": type(error).__name__}
                 terminal_error = NodeAnalysisCloudErrorCode.INVALID_RESPONSE
             except httpx.TimeoutException as error:
                 terminal_diagnostic = {"exception_type": type(error).__name__}
-                if attempt < self._max_retries:
+                if attempt < max_retries:
                     self._backoff(attempt, None)
                     continue
                 terminal_error = NodeAnalysisCloudErrorCode.TIMEOUT
             except httpx.RequestError as error:
                 terminal_diagnostic = {"exception_type": type(error).__name__}
-                if attempt < self._max_retries:
+                if attempt < max_retries:
                     self._backoff(attempt, None)
                     continue
                 terminal_error = NodeAnalysisCloudErrorCode.NETWORK
@@ -568,7 +769,7 @@ class NodeAnalysisCloudClient:
                 if (
                     self._response_format == "json_object"
                     and self._has_blank_message_content(response)
-                    and attempt < self._max_retries
+                    and attempt < max_retries
                 ):
                     self._backoff(attempt, None)
                     continue
@@ -579,7 +780,7 @@ class NodeAnalysisCloudClient:
                     NodeAnalysisCloudErrorCode.RATE_LIMIT,
                     NodeAnalysisCloudErrorCode.SERVER,
                 }
-                and attempt < self._max_retries
+                and attempt < max_retries
             ):
                 self._backoff(attempt, response.headers.get("Retry-After"))
                 continue
@@ -630,6 +831,10 @@ class NodeAnalysisCloudClient:
                 context=context,
                 diagnostic={"http_status": response.status_code},
             )
+        # 有些供应商会以 200 返回空 content（例如安全过滤或耗尽生成预算）。不能记录
+        # 正文、reasoning 或供应商错误文本，但需要把这几个枚举/布尔元数据留下，才能将
+        # “模型未按 Schema 输出”与“供应商没有输出可解析内容”区分开。
+        response_diagnostic = self._safe_response_metadata(body, response.status_code)
         try:
             message = body["choices"][0]["message"]
         except (KeyError, IndexError, TypeError):
@@ -639,14 +844,14 @@ class NodeAnalysisCloudClient:
                 NodeAnalysisCloudErrorCode.INVALID_RESPONSE,
                 attempts=attempts,
                 context=context,
-                diagnostic={"http_status": response.status_code},
+                diagnostic=response_diagnostic,
             )
         if message.get("refusal"):
             raise NodeAnalysisCloudError(
                 NodeAnalysisCloudErrorCode.INVALID_RESPONSE,
                 attempts=attempts,
                 context=context,
-                diagnostic={"http_status": response.status_code},
+                diagnostic={**response_diagnostic, "refusal": True},
             )
         parsed = message.get("parsed")
         if isinstance(parsed, Mapping):
@@ -668,8 +873,31 @@ class NodeAnalysisCloudClient:
             NodeAnalysisCloudErrorCode.INVALID_RESPONSE,
             attempts=attempts,
             context=context,
-            diagnostic={"http_status": response.status_code},
+            diagnostic=response_diagnostic,
         )
+
+    @staticmethod
+    def _safe_response_metadata(body: object, http_status: int) -> dict[str, str | int | bool]:
+        """提取无正文的供应商响应状态，供审计和重试决策使用。"""
+
+        diagnostic: dict[str, str | int | bool] = {"http_status": http_status}
+        if not isinstance(body, Mapping):
+            return diagnostic
+        for key in ("input_sensitive", "output_sensitive"):
+            value = body.get(key)
+            if isinstance(value, bool):
+                diagnostic[key] = value
+        choices = body.get("choices")
+        if isinstance(choices, list) and choices and isinstance(choices[0], Mapping):
+            finish_reason = choices[0].get("finish_reason")
+            if isinstance(finish_reason, str):
+                diagnostic["finish_reason"] = finish_reason[:80]
+        base_response = body.get("base_resp")
+        if isinstance(base_response, Mapping):
+            status_code = base_response.get("status_code")
+            if isinstance(status_code, int) and not isinstance(status_code, bool):
+                diagnostic["provider_status_code"] = status_code
+        return diagnostic
 
     @staticmethod
     def _parse_json(
@@ -755,21 +983,39 @@ class NodeAnalysisCloudClient:
         except httpx.InvalidURL:
             return False
 
+    @property
+    def _is_minimax_m3(self) -> bool:
+        return self._is_minimax and self._model.strip().casefold() in {
+            "minimax-m3",
+            "minimax/minimax-m3",
+        }
+
     @staticmethod
     def _with_json_schema_instruction(
         content: str,
         schema: Mapping[str, Any],
+        *,
+        include_example: bool = True,
     ) -> str:
-        return f"{content}\n\n{NodeAnalysisCloudClient._json_object_instruction(schema)}"
+        instruction = NodeAnalysisCloudClient._json_object_instruction(
+            schema, include_example=include_example
+        )
+        return f"{content}\n\n{instruction}"
 
     @staticmethod
-    def _json_object_instruction(schema: Mapping[str, Any]) -> str:
+    def _json_object_instruction(schema: Mapping[str, Any], *, include_example: bool = True) -> str:
         serialized_schema = json.dumps(
             schema,
             ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
         )
+        if not include_example:
+            # 复杂画像有完整维度和情境模块，空列表式“最小示例”会误导模型省略交付。
+            return (
+                "仅返回符合下列结构的 json 对象，不输出解释或额外字段。\njson schema："
+                + serialized_schema
+            )
         serialized_example = json.dumps(
             _minimal_json_example(schema, root_schema=schema),
             ensure_ascii=False,
@@ -825,6 +1071,75 @@ class NodeAnalysisCloudClient:
         traceback: TracebackType | None,
     ) -> None:
         self.close()
+
+
+def _record_structured_completion_usage(
+    *,
+    span: object | None,
+    response_body: object,
+    model_name: str,
+    operation_id: str | None,
+    attempts: int,
+) -> None:
+    """把供应商原始 usage 原样计入 Phoenix 和当前 Agent 根摘要。
+
+    没有 ``usage`` 时保持 ``not_reported``：本地字符估算只用于上下文盘点，绝不能伪造
+    成模型或缓存 token。该函数也不从响应正文推断缓存命中。
+    """
+
+    usage = response_body.get("usage") if isinstance(response_body, Mapping) else None
+    normalized_usage = usage if isinstance(usage, Mapping) else None
+    attributes: dict[str, object] = {"moonlightbox.provider.attempts": attempts}
+    for attribute, keys in (
+        ("llm.token_count.prompt", ("prompt_tokens", "input_tokens")),
+        ("llm.token_count.completion", ("completion_tokens", "output_tokens")),
+        ("llm.token_count.total", ("total_tokens",)),
+        ("llm.token_count.reasoning", ("reasoning_tokens", "reasoning_content_tokens")),
+        (
+            "llm.token_count.cache_read",
+            ("cached_tokens", "cache_read_tokens", "cache_read_input_tokens"),
+        ),
+        (
+            "llm.token_count.cache_write",
+            ("cache_write_tokens", "cache_creation_input_tokens"),
+        ),
+    ):
+        value = _usage_value(normalized_usage, *keys)
+        if value is not None:
+            attributes[attribute] = value
+    record_span_attributes(span, attributes)
+    trace_context = current_agent_execution_trace_context()
+    if trace_context is not None:
+        record_external_provider_call(
+            trace_context.state,
+            provider="cognition",
+            model_name=model_name,
+            operation_id=operation_id,
+            usage=normalized_usage,
+            attempts=attempts,
+        )
+
+
+def _usage_value(usage: Mapping[object, object] | None, *keys: str) -> int | None:
+    if usage is None:
+        return None
+    containers: tuple[Mapping[object, object], ...] = (
+        usage,
+        *tuple(
+            value
+            for value in (
+                usage.get("prompt_tokens_details"),
+                usage.get("completion_tokens_details"),
+            )
+            if isinstance(value, Mapping)
+        ),
+    )
+    for container in containers:
+        for key in keys:
+            value = container.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                return value
+    return None
 
 
 def _unwrap_json_content(content: str) -> str:

@@ -72,6 +72,7 @@ def test_start_script_prepares_starts_and_cleans_up_isolated_workers(
         bin_dir / "uv",
         'echo "uv $*" >> "$START_TEST_LOG"\n'
         'case "$*" in\n'
+        "  *phoenix\\ serve*) trap 'exit 0' TERM; while :; do sleep 0.01; done ;;\n"
         '  *worker_main*) trap \'echo "worker stopped" >> "$START_TEST_LOG"; exit 0\' TERM; '
         "while :; do sleep 0.01; done ;;\n"
         "  *uvicorn*) trap 'exit 0' TERM; while :; do sleep 0.01; done ;;\n"
@@ -93,6 +94,11 @@ def test_start_script_prepares_starts_and_cleans_up_isolated_workers(
         "PATH": f"{bin_dir}:/bin:/usr/bin",
         "START_TEST_LOG": str(log_path),
         "MOONLIGHTBOX_ROOT_DIR": str(project_dir),
+        # 测试机可能已有体验环境监听默认后端端口；启动脚本的端口占用保护本身
+            # 应保留，故测试必须显式使用不会与真实服务冲突的端口。
+            "MOONLIGHTBOX_BACKEND_PORT": "18001",
+            "MOONLIGHTBOX_FRONTEND_PORT": "15175",
+            "MOONLIGHTBOX_PHOENIX_PORT": "16006",
         "MOONLIGHTBOX_MONITOR_POLL_SECONDS": "0.01",
     }
 
@@ -119,10 +125,11 @@ def test_start_script_prepares_starts_and_cleans_up_isolated_workers(
     assert log_path.exists(), stderr
     commands = log_path.read_text(encoding="utf-8")
     assert process.returncode == 130
-    assert "uv sync --extra linux-ml" in commands
+    assert "uv sync --extra observability --extra linux-ml" in commands
     assert "npm install" in commands
     assert "uv run alembic -c backend/alembic.ini upgrade head" in commands
     assert "uv run uvicorn moonlightbox.api:app --app-dir backend" in commands
+    assert "uv run --extra observability phoenix serve" in commands
     assert "--reload" not in commands
     assert "uv run uvicorn moonlightbox.persona_runtime:app --app-dir backend" in commands
     assert "curl --fail --silent --show-error http://127.0.0.1:8765/health" in commands
@@ -163,6 +170,7 @@ def test_start_script_force_kills_stubborn_child_with_bounded_wait(
         bin_dir / "uv",
         'echo "uv $*" >> "$START_TEST_LOG"\n'
         'case "$*" in\n'
+        "  *phoenix\\ serve*) trap 'exit 0' TERM; while :; do sleep 0.05; done ;;\n"
         "  *worker_main*) sh -c 'trap \"\" TERM; while :; do sleep 0.05; done' "
         "</dev/null >/dev/null 2>&1 & "
         'echo "$$ $!" >> "$START_TEST_PROCESSES"; trap \'\' TERM; wait ;;\n'
@@ -183,6 +191,9 @@ def test_start_script_force_kills_stubborn_child_with_bounded_wait(
         "START_TEST_LOG": str(log_path),
         "START_TEST_PROCESSES": str(process_path),
         "MOONLIGHTBOX_ROOT_DIR": str(project_dir),
+        "MOONLIGHTBOX_BACKEND_PORT": "18001",
+        "MOONLIGHTBOX_FRONTEND_PORT": "15175",
+        "MOONLIGHTBOX_PHOENIX_PORT": "16006",
         "MOONLIGHTBOX_SHUTDOWN_GRACE_STEPS": "1",
         "MOONLIGHTBOX_SHUTDOWN_POLL_SECONDS": "0.01",
         "MOONLIGHTBOX_MONITOR_POLL_SECONDS": "0.01",

@@ -60,8 +60,8 @@ def _split_pinned_hf_reference(value: str) -> tuple[str, dict[str, str]]:
 class SharedLinuxModelRuntime:
     """按需常驻一组 Transformers 基座模型与 PEFT LoRA。
 
-    同一时刻只保留一组权重。这样 Director（无 adapter）和 PersonaActor（带
-    adapter）串行调用时不会在 4GB 显存上意外叠加两份模型。
+    同一时刻只保留一组基础模型权重。Director 和 PersonaActor 串行调用同一基座，
+    避免体验阶段因加载 LoRA adapter 而额外占用有限显存。
     """
 
     def __init__(
@@ -118,8 +118,18 @@ class SharedLinuxModelRuntime:
             "repetition_penalty": self._sampling.repetition_penalty,
             "pad_token_id": self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
         }
-        with torch.inference_mode():
-            generated = self.model.generate(**generation_kwargs)
+        try:
+            with torch.inference_mode():
+                generated = self.model.generate(**generation_kwargs)
+        except RuntimeError as error:
+            # OOM 后必须释放权重和 allocator cache，避免下一次推理继续受残留缓存影响。
+            # 其他 RuntimeError 保留原始语义上抛。
+            if "out of memory" in str(error).lower():
+                self.release()
+                raise RuntimeInferenceError(
+                    "Runtime 推理显存不足，已释放模型等待下次请求"
+                ) from error
+            raise
         self._raise_if_stopped(should_cancel, deadline)
         return str(
             self.tokenizer.decode(
@@ -364,7 +374,7 @@ class DatabaseLinuxRuntimeInferenceBackend:
             "runtime_token_count",
         }:
             raise RuntimeInferenceError("不支持的 Runtime 推理请求类型")
-        base_model, adapter_path = self._model_paths(request.model_version_id)
+        base_model, _adapter_path = self._model_paths(request.model_version_id)
         system_prompt = request.payload.get("system_prompt")
         if request.request_type == "runtime_token_count":
             text = request.payload.get("text")
@@ -381,8 +391,9 @@ class DatabaseLinuxRuntimeInferenceBackend:
             output = {
                 "content": self._runtime.generate_raw(
                     base_model=base_model,
-                    # Director 只使用基座；Actor 才挂当前已验收的 LoRA。
-                    adapter_path=adapter_path if request.request_type == "runtime_actor" else None,
+                    # 体验阶段保留 PersonaActor 的 Agent 与工具链，但不加载 LoRA。
+                    # 模型版本仍用于选择同一受控基础模型；adapter 路径不参与推理。
+                    adapter_path=None,
                     messages=[{"role": "system", "content": system_prompt}, *messages],
                     max_tokens=512,
                     should_cancel=should_cancel,

@@ -136,7 +136,7 @@ def _enqueue_import(settings: Settings) -> tuple[str, str, str]:
     database = Database(settings.database_url)
     with Session(database.engine) as session:
         service = JobService(session)
-        service.cancel(confirmed["analysis_job_id"])
+        assert confirmed["analysis_job_id"] is None  # 正常导入不再启动旧事件评分器。
         snapshot = build_analysis_job_snapshot(settings)
         job = service.enqueue_unique(
             ANALYSIS_JOB_KIND,
@@ -521,19 +521,14 @@ def test_running_v2_job_cancel_interrupts_pipeline_and_stays_cancelled(
 
     with Session(database.engine) as session:
         JobService(session).cancel(job_id)
-    analysis_interrupted_before_release = False
-    deadline = monotonic() + 1.5
-    while monotonic() < deadline:
-        with Session(database.engine) as session:
-            run = session.query(AnalysisRun).filter_by(import_id=import_id).one()
-            if run.status == "interrupted":
-                analysis_interrupted_before_release = True
-                break
-        sleep(0.01)
+    # 这个假客户端故意阻塞且不支持取消：请求取消不能冒充执行已退出。
+    with Session(database.engine) as session:
+        assert JobService(session).get(job_id).status == "cancelling"
+        assert session.query(AnalysisRun).filter_by(import_id=import_id).one().status == "running"
+    assert thread.is_alive()
     release.set()
     thread.join(timeout=2)
 
-    assert analysis_interrupted_before_release
     assert not thread.is_alive()
     with Session(database.engine) as session:
         job = JobService(session).get(job_id)

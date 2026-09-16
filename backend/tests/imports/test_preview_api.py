@@ -7,6 +7,20 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 
+def test_system_sender_is_not_a_selectable_person(client: TestClient):
+    project = client.post('/api/projects', json={'name': '系统通知过滤'}).json()
+    root = f"/api/projects/{project['id']}/imports"
+    content = ('时间,发送者,类型,内容\n'
+               '2026-01-01 20:00:00,甲,文本,你好\n'
+               '2026-01-01 20:00:01,乙,文本,你好\n'
+               '2026-01-01 20:00:02,系统,系统,撤回了一条消息\n').encode()
+    preview = client.post(root + '/preview', files={'file': ('chat.csv', content, 'text/csv')}).json()
+    assert preview['participants'] == ['甲', '乙']
+    assert preview['message_count'] == 3
+    result = client.post(root + f"/{preview['id']}/confirm", json={'self_participant': '甲', 'target_participant': '系统'})
+    assert result.status_code in {400, 422}
+
+
 def test_preview_reports_chat_without_confirming_messages(client: TestClient) -> None:
     project = client.post("/api/projects", json={"name": "导入测试"}).json()
     source = Path("tests/fixtures/wxecho_sample.csv")

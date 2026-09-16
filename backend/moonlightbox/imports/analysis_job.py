@@ -345,14 +345,13 @@ def create_event_analysis_v2_handler(
             def should_cancel() -> bool:
                 if should_stop is not None and should_stop():
                     return True
-                return (
-                    service.heartbeat(
-                        job.id,
-                        token=token,
-                        lease_duration=JOB_LEASE_DURATION,
-                    )
-                    is None
+                active = service.heartbeat(
+                    job.id,
+                    token=token,
+                    lease_duration=JOB_LEASE_DURATION,
                 )
+                # cancelling 仍需续租直至退出，但不能继续分析或发布。
+                return active is None or active.status != "running"
 
             def report_progress(checkpoint: dict[str, object]) -> None:
                 if should_cancel():
@@ -431,14 +430,13 @@ def create_event_analysis_v3_handler(
             def should_cancel() -> bool:
                 if should_stop is not None and should_stop():
                     return True
-                return (
-                    service.heartbeat(
-                        job.id,
-                        token=token,
-                        lease_duration=JOB_LEASE_DURATION,
-                    )
-                    is None
+                active = service.heartbeat(
+                    job.id,
+                    token=token,
+                    lease_duration=JOB_LEASE_DURATION,
                 )
+                # cancelling 仍需续租直至退出，但不能继续分析或发布。
+                return active is None or active.status != "running"
 
             def report_progress(checkpoint: dict[str, object]) -> None:
                 if should_cancel():

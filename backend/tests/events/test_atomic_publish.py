@@ -161,6 +161,9 @@ def test_cancel_wins_before_publish_and_rolls_back_all_publish_writes(
     assert len(publish_errors) == 1
     assert isinstance(publish_errors[0], JobLeaseLostError)
     with Session(database.engine) as session:
+        assert JobService(session).get(job_id).status == "cancelling"
+        # 请求取消不冒充执行栈已退出；模拟 Worker 退出后的确认。
+        JobService(session).acknowledge_cancellation(job_id, token=token)
         assert JobService(session).get(job_id).status == "cancelled"
         assert session.get(AnalysisRun, run_id).status == "running"  # type: ignore[union-attr]
         assert session.scalar(select(func.count()).select_from(EventNode)) == 0

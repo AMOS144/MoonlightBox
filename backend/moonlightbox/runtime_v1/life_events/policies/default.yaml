@@ -1,0 +1,21 @@
+version: life-opportunity-v2
+check_interval_minutes: 20
+trigger_probability:
+  interpolation: periodic_smoothstep
+  anchors:
+    "00:00": 0.08
+    "03:00": 0.03
+    "06:00": 0.10
+    "09:00": 0.25
+    "12:00": 0.35
+    "15:00": 0.30
+    "18:00": 0.40
+    "21:00": 0.25
+direction_weights:
+  autonomy: 0.25
+  competence: 0.35
+  relatedness: 0.40
+intensity_distribution:
+  family: beta
+  alpha: 2.0
+  beta: 5.0

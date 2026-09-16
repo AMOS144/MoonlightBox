@@ -150,7 +150,28 @@ def test_import_confirm_worker_publishes_safe_idempotent_v3_events(
         )
         assert confirmed.status_code == 201
         confirmation = confirmed.json()
-        job_id = confirmation["analysis_job_id"]
+        assert confirmation["analysis_job_id"] is None
+        # 历史事件发布的兼容测试显式建任务，正常导入不再隐式评分。
+        from moonlightbox.imports.analysis_job import (
+            build_v3_analysis_job_snapshot,
+            config_fingerprint,
+            v3_analysis_dedupe_key,
+        )
+        from moonlightbox.jobs.service import JobService
+
+        with Session(database.engine) as session:
+            snapshot = build_v3_analysis_job_snapshot(settings)
+            legacy_job = JobService(session).enqueue_unique(
+                V3_ANALYSIS_JOB_KIND,
+                {
+                    "project_id": project["id"],
+                    "import_id": confirmation["import_id"],
+                    "analysis_config": snapshot,
+                    "config_fingerprint": config_fingerprint(snapshot),
+                },
+                dedupe_key=v3_analysis_dedupe_key(confirmation["import_id"], snapshot),
+            )
+            job_id = legacy_job.id
         queued_job = client.get(f"/api/jobs/{job_id}").json()
         assert queued_job["kind"] == V3_ANALYSIS_JOB_KIND
         assert queued_job["status"] == "queued"
@@ -214,7 +235,7 @@ def test_import_confirm_worker_publishes_safe_idempotent_v3_events(
             json={"self_participant": "乙", "target_participant": "甲"},
         )
         assert replay.status_code == 200
-        assert replay.json()["analysis_job_id"] == job_id
+        assert replay.json()["analysis_job_id"] is None
         assert worker.run_once() is False
         replayed_events = client.get(f"/api/projects/{project['id']}/events").json()
         assert replayed_events == events

@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
-from langchain_core.tools import StructuredTool
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from moonlightbox.imports.models import Message
 
 from .branch_models import BranchMessage
-from .config import TOOL_DESCRIPTIONS, TOOL_SCHEMAS
-from .db_models import RuntimeLifeEventRow, RuntimeMemoryIndexRow, RuntimeMemoryRow
-from .schemas import MemoryEvidence, MemoryRecord, SearchMemoryArgs
+from .db_models import (
+    RuntimeLifeEventRow,
+    RuntimeMemoryIndexRow,
+    RuntimeMemoryRow,
+    RuntimeSnapshotRow,
+)
+from .schemas import MemoryEvidence, MemoryRecord
+from .tools.memory_search import SearchMemoryArgs
 
 
 class MemoryService:
@@ -103,6 +106,8 @@ class MemoryService:
     ) -> dict[str, Any]:
         """按 scope 和关键词读取当前有效记录，并保留来源边界。"""
         scopes = {args.scope} if args.scope != "both" else {"branch", "world"}
+        if snapshot_id is None:
+            scopes.discard("world")
         query = select(RuntimeMemoryRow).where(
             RuntimeMemoryRow.status.in_(["asserted", "confirmed"]),
             RuntimeMemoryRow.scope.in_(scopes),
@@ -120,32 +125,52 @@ class MemoryService:
             row
             for row in self.session.scalars(query.order_by(RuntimeMemoryRow.created_at.desc()))
             if (row.valid_to is None or _at_or_after(row.valid_to, current))
+            and (row.valid_from is None or _at_or_after(current, row.valid_from))
             and (row.scope != "branch" or branch_record_ids is None or row.id in branch_record_ids)
         ]
-        terms = _query_terms(args.query)
         excluded = excluded_source_ids or set()
+        snapshot_source_ids = self._snapshot_source_ids(snapshot_id)
+        branch_source_ids = self._branch_source_ids(branch_id)
 
         def score(row: RuntimeMemoryRow) -> tuple[int, int, float, datetime]:
-            haystack = f"{row.subject} {row.predicate} {row.object} {row.summary}".lower()
-            matches = sum(term in haystack for term in terms)
+            # SQL 部分是分支/画像的近期上下文候选，不再用字面词频冒充语义相关性。
+            matches = 0
             priority = 2 if row.scope == "branch" and row.status == "confirmed" else 1
             return matches, priority, float(row.confidence), _aware_or_min(row.created_at)
 
         results: list[MemoryEvidence] = []
         for row in sorted(rows, key=score, reverse=True):
-            source_ids = [str(item) for item in (row.source_ids or [])]
+            # 旧 Profile 编译产物中曾混入“相关对话”“日期文本”等展示标签。记忆
+            # 摘要仍可作为弱背景阅读，但这些标签绝不能随 source_ids 传给 Agent，
+            # 否则它们可能被误写为 DayPlan 的可审计证据。
+            allowed_sources = (
+                snapshot_source_ids
+                if row.scope == "world"
+                else branch_source_ids | snapshot_source_ids
+            )
+            source_ids = [
+                str(item) for item in (row.source_ids or []) if str(item) in allowed_sources
+            ]
             if source_ids and set(source_ids).issubset(excluded):
                 continue
             original = self._original_excerpt(source_ids) if args.include_original else None
             results.append(
                 MemoryEvidence(
+                    basis=row.predicate,
                     record_id=row.id,
                     scope=row.scope,  # type: ignore[arg-type]
                     summary=row.summary,
                     source_ids=source_ids,
                     occurred_at=row.valid_from,
                     valid_until=row.valid_to,
-                    certainty="approved" if row.status == "confirmed" else "observed",
+                    certainty=(
+                        "inferred"
+                        if row.predicate == "inferred"
+                        or any(source.startswith("profile:") for source in source_ids)
+                        else "approved"
+                        if row.status == "confirmed"
+                        else "observed"
+                    ),
                     original=original,
                 )
             )
@@ -158,38 +183,33 @@ class MemoryService:
             "source_ids": [source for item in results for source in item.source_ids],
             "truncated": len(results) >= args.limit and len(rows) > len(results),
             "data": [item.model_dump(mode="json") for item in results],
+            "selection": "recent_context_not_semantic_matches",
         }
 
-    def tool(
-        self,
-        *,
-        branch_id: str,
-        snapshot_id: str | None,
-        excluded_source_ids: set[str] | None = None,
-        as_of: datetime | None = None,
-    ) -> StructuredTool:
-        """绑定当前 Cycle 身份，模型只能传 scope/query/limit 等参数。"""
+    def _snapshot_source_ids(self, snapshot_id: str | None) -> set[str]:
+        if snapshot_id is None:
+            return set()
+        snapshot = self.session.get(RuntimeSnapshotRow, snapshot_id)
+        if snapshot is None:
+            return set()
+        from .snapshot_sources import frozen_source_ids
 
-        index = self.current_index(branch_id)
-        active_ids = set(index.active_record_ids or []) if index is not None else set()
+        return frozen_source_ids(self.session, snapshot)
 
-        def invoke(**kwargs: Any) -> dict[str, Any]:
-            args = SearchMemoryArgs.model_validate(kwargs)
-            return self.search(
-                branch_id=branch_id,
-                snapshot_id=snapshot_id,
-                args=args,
-                excluded_source_ids=excluded_source_ids,
-                as_of=as_of,
-                branch_record_ids=active_ids,
+    def _branch_source_ids(self, branch_id: str) -> set[str]:
+        """分支记忆只能引向本分支真实消息或已提交生活事件。"""
+
+        source_ids = set(
+            self.session.scalars(
+                select(BranchMessage.id).where(BranchMessage.branch_id == branch_id)
             )
-
-        return StructuredTool.from_function(
-            name="search_memory",
-            description=TOOL_DESCRIPTIONS["search_memory"],
-            func=invoke,
-            args_schema=cast(Any, TOOL_SCHEMAS["search_memory"]),
         )
+        source_ids.update(
+            self.session.scalars(
+                select(RuntimeLifeEventRow.id).where(RuntimeLifeEventRow.branch_id == branch_id)
+            )
+        )
+        return source_ids
 
     def _original_excerpt(self, source_ids: list[str]) -> str | None:
         """按需返回少量原文；未找到时绝不拿摘要冒充原文。"""
@@ -214,20 +234,6 @@ class MemoryService:
         if isinstance(life_event, dict):
             return str(life_event)[:1200]
         return None
-
-
-def _query_terms(query: str) -> list[str]:
-    """英文按词、中文按双字切分，使没有空格的查询也能排序。"""
-
-    normalized = query.lower().strip()
-    words = re.findall(r"[a-z0-9_]+|[\u4e00-\u9fff]+", normalized)
-    terms: list[str] = []
-    for word in words:
-        if len(word) <= 2 or not re.fullmatch(r"[\u4e00-\u9fff]+", word):
-            terms.append(word)
-        else:
-            terms.extend(word[index : index + 2] for index in range(len(word) - 1))
-    return list(dict.fromkeys(term for term in terms if term))
 
 
 def _at_or_after(value: datetime, current: datetime) -> bool:

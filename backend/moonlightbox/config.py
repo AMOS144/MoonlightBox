@@ -7,6 +7,22 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    @classmethod
+    def settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings):
+        def saved_model_settings():
+            # 用户配置跟随共享数据目录，不修改仓库 .env；显式构造参数仍优先。
+            import json
+            sources = [init_settings(), env_settings(), dotenv_settings()]
+            data_dir = next((v["data_dir"] for v in sources if "data_dir" in v), "data")
+            path = Path(data_dir) / "agent-model-settings.json"
+            if not path.exists():
+                return {}
+            value = json.loads(path.read_text(encoding="utf-8"))
+            allowed = {f"{prefix}_{suffix}" for prefix in ("cognition", "node_analysis") for suffix in ("model", "endpoint", "api_key")}
+            allowed.add("cognition_backend")
+            return {k: v for k, v in value.items() if k in allowed}
+        return init_settings, saved_model_settings, env_settings, dotenv_settings, file_secret_settings
+
     model_config = SettingsConfigDict(
         env_prefix="MOONLIGHTBOX_",
         env_file=".env",
@@ -15,6 +31,19 @@ class Settings(BaseSettings):
     )
 
     data_dir: Path = Path("data")
+    # 体验环境可只读复用原项目的媒体库。写入始终留在 data_dir，绝不落到此目录。
+    media_read_only_source_dir: Path | None = None
+    # Phoenix 是所有 Agent 的统一可观测性后端。默认关闭，避免在未显式启动本地
+    # Collector 时影响普通开发；启用后 API 与 Worker 都会向同一 OTLP/HTTP 端点发送 Trace。
+    phoenix_enabled: bool = False
+    phoenix_collector_endpoint: str = "http://127.0.0.1:6006/v1/traces"
+    phoenix_project_name: str = "moonlightbox"
+    # 本项目是单用户本机体验环境，默认将 Agent 的输入、输出、工具返回和压缩快照导入
+    # 自托管 Phoenix，以便完整回放。密钥仍会被强制脱敏；若需关闭正文导出可显式设 false。
+    phoenix_capture_content: bool = True
+    phoenix_trace_max_characters: int = Field(default=64_000, ge=512, le=100_000)
+    # 根因摘要以 Phoenix CODE Annotation 回写；失败仅影响诊断标签，不影响 Agent 结果。
+    phoenix_annotations_enabled: bool = True
     database_url: str = "sqlite:///data/moonlightbox.db"
     chroma_dir: Path = Path("data/chroma")
     model_dir: Path = Path("models")
@@ -37,7 +66,9 @@ class Settings(BaseSettings):
         le=86400,
     )
     node_analysis_response_format: Literal["json_schema", "json_object"] = "json_schema"
-    node_analysis_thinking_mode: Literal["default", "disabled"] = "disabled"
+    # 节点分析、PersonWorld 等都是多步调查 Agent，默认保留模型思考；只有明确的
+    # 低延迟批处理任务才可以通过环境变量关闭。
+    node_analysis_thinking_mode: Literal["default", "disabled"] = "default"
     node_analysis_max_output_tokens: int = Field(default=8192, gt=0, le=65536)
     lightrag_enabled: bool = False
     lightrag_sidecar_url: str = "http://127.0.0.1:9621"
@@ -55,6 +86,15 @@ class Settings(BaseSettings):
     lightrag_query_top_k: int = Field(default=30, ge=1, le=100)
     lightrag_query_chunk_top_k: int = Field(default=12, ge=1, le=100)
     lightrag_query_max_total_tokens: int = Field(default=16000, ge=1000, le=100000)
+    # Send 扇出并发度受限于 7；限流由统一请求退避处理，不自动修改此并发配置。
+    person_world_section_concurrency: int = Field(default=3, ge=1, le=7)
+    # PersonWorld 是持续调查循环：不按 Prompt 的“轮数”结束。以下只是一致的系统
+    # 熔断器，分别处理总成本、重复调用循环与单栏目的墙钟时间。
+    person_world_section_max_tool_calls: int = Field(default=48, ge=12, le=200)
+    person_world_section_deadline_seconds: float = Field(default=900.0, ge=60, le=7200)
+    person_world_section_max_stalled_cycles: int = Field(default=2, ge=1, le=8)
+    person_world_section_model_timeout_seconds: float = Field(default=300.0, ge=10, le=1800)
+    person_world_section_tool_timeout_seconds: float = Field(default=300.0, gt=0, le=1800)
     world_compiler_timeout_seconds: float = Field(default=300.0, gt=0, le=7200)
     spatial_analysis_enabled: bool = False
     spatial_analysis_backend: Literal["auto", "local", "cloud", "structured_only"] = "cloud"
@@ -67,12 +107,22 @@ class Settings(BaseSettings):
     cognition_endpoint: str = "https://api.deepseek.com/chat/completions"
     cognition_model: str = "deepseek-v4-flash"
     cognition_api_key: SecretStr | None = None
-    cognition_timeout_seconds: float = Field(default=90.0, gt=0, le=300)
+    cognition_timeout_seconds: float = Field(default=300.0, gt=0, le=1800)
     cognition_max_retries: int = Field(default=2, ge=0, le=10)
     cognition_response_format: Literal["json_schema", "json_object"] = "json_object"
+    # Director / DayPlanAgent / PersonaActor 都需要基于上下文规划与调用工具；默认
+    # 开启 MiniMax M3 的思考。只有延迟优先的纯文本回复才应显式设为 disabled。
     cognition_thinking_mode: Literal["default", "disabled"] = "default"
-    cognition_max_output_tokens: int = Field(default=4096, gt=0, le=65536)
+    # M3 的 completion 预算同时包含思考与最终正文。Runtime Agent 不在各领域调用
+    # 里另设小上限；统一保留足够预算，以免工具规划尚未输出就被截断。
+    cognition_max_output_tokens: int = Field(default=24576, gt=0, le=65536)
     reply_review_enabled: bool = False
+    # 中国法定工作日历按年度在线刷新并保存在共享 data 目录。URL 固定在实现中，
+    # 不允许通过环境变量把 Runtime 指向任意站点。
+    work_calendar_enabled: bool = True
+    work_calendar_cache_dir: Path | None = None
+    work_calendar_refresh_hours: float = Field(default=24.0, gt=0, le=168)
+    work_calendar_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
     # Linux 默认使用可被 Transformers 直接加载的模型；旧 MLX 路径文件不可用。
     # 固定到已验证的 HF commit，训练不能跟随可变的 main 标签。
     training_base_model: str = "Qwen/Qwen3-1.7B@70d244cc86ccca08cf5af4e1e306ecf908b1ad5e"
@@ -87,6 +137,8 @@ class Settings(BaseSettings):
     training_recency_window_days: int = Field(default=10, ge=0)
     training_recency_multiplier: int = Field(default=2, ge=1)
     runtime_style_transfer_enabled: bool = False
+    # 生活推进是正式运行时的一部分；这里只配置概率文件，不提供启停开关。
+    runtime_life_policy_path: str | None = None
     training_context_turns: int = Field(default=12, gt=0)
     training_protocol_version: str = (
         "persona-plain-text-private-chat-v19-runtime-style-transfer-aligned"
@@ -121,6 +173,22 @@ class Settings(BaseSettings):
             raise ValueError("节点分析 endpoint 必须是有效的 http(s) URL")
         if parsed.username or parsed.password:
             raise ValueError("节点分析 endpoint 不允许包含用户凭据")
+        return normalized
+
+    @field_validator("phoenix_collector_endpoint")
+    @classmethod
+    def validate_phoenix_collector_endpoint(cls, value: str) -> str:
+        normalized = value.strip().rstrip("/")
+        try:
+            parsed = httpx.URL(normalized)
+        except httpx.InvalidURL:
+            raise ValueError("Phoenix Collector 地址必须是有效的 http(s) URL") from None
+        if parsed.scheme not in {"http", "https"} or not parsed.host:
+            raise ValueError("Phoenix Collector 地址必须是有效的 http(s) URL")
+        if parsed.username or parsed.password:
+            raise ValueError("Phoenix Collector 地址不能包含用户凭据")
+        if not parsed.path.endswith("/v1/traces"):
+            raise ValueError("Phoenix Collector 地址必须以 /v1/traces 结尾")
         return normalized
 
     @field_validator("lightrag_sidecar_url")

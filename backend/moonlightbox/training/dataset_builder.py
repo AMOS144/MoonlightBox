@@ -666,7 +666,39 @@ class DatasetBuilder:
         )
         return manifest
 
-    # 仅兼容外部旧脚本；生产 Linux 训练入口使用 write_lora_dataset。
+    # 仅兼容外部旧脚本和历史数据验收；生产 Linux 训练入口使用
+    # ``write_lora_dataset``，不会触发任何 MLX/Mac 路径。
+    def write_mlx_dataset(
+        self,
+        examples: list[TrainingExample],
+        directory: Path,
+        target_sender: str,
+        cutoff: datetime,
+        **kwargs: object,
+    ) -> DatasetManifest:
+        """兼容旧方法名，实际始终导出与 Linux LoRA 训练相同的 JSONL 合同。"""
+
+        return self.write_lora_dataset(
+            examples,
+            directory,
+            target_sender,
+            cutoff,
+            confirmation_id=_optional_str(kwargs.get("confirmation_id")),
+            analysis_run_id=_optional_str(kwargs.get("analysis_run_id")),
+            node_snapshot_hash=_optional_str(kwargs.get("node_snapshot_hash")),
+            base_model=_optional_str(kwargs.get("base_model")),
+            training_config=(
+                dict(value)
+                if isinstance((value := kwargs.get("training_config")), dict)
+                else None
+            ),
+        )
+
+
+def _optional_str(value: object) -> str | None:
+    """历史兼容入口只透传明确的字符串审计字段。"""
+
+    return value if isinstance(value, str) else None
 
 
 def _write_jsonl(path: Path, examples: list[TrainingExample]) -> None:

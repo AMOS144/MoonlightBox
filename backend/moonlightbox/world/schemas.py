@@ -5,16 +5,36 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-SourceStatus = Literal["direct", "summarized", "inferred", "superseded"]
+SourceStatus = Literal[
+    "direct",
+    "summarized",
+    "inferred",
+    "human_corrected",
+    "superseded",
+]
 AssertionKind = Literal[
-    "self_fact", "other_person_fact", "general_rule", "plan", "desire",
-    "report", "joke", "question", "unknown",
+    "self_fact",
+    "other_person_fact",
+    "general_rule",
+    "plan",
+    "desire",
+    "report",
+    "joke",
+    "question",
+    "unknown",
 ]
 Referent = Literal[
-    "target_person", "user", "third_person", "organization", "place",
-    "general_topic", "unknown",
+    "target_person",
+    "user",
+    "third_person",
+    "organization",
+    "place",
+    "general_topic",
+    "unknown",
 ]
-TemporalStatus = Literal["current", "past", "planned", "recurring", "one_off", "timeless", "unknown"]
+TemporalStatus = Literal[
+    "current", "past", "planned", "recurring", "one_off", "timeless", "unknown"
+]
 
 
 class SourcedStatement(BaseModel):
@@ -23,6 +43,7 @@ class SourcedStatement(BaseModel):
     # Keep the payload shape strict while allowing this normal JSON round trip.
     model_config = ConfigDict(extra="forbid")
 
+    claim_id: str | None = Field(default=None, min_length=36, max_length=36)
     text: str = Field(min_length=1, max_length=1000)
     source_status: SourceStatus
     source_document_ids: list[str] = Field(default_factory=list, max_length=40)
@@ -92,6 +113,12 @@ class WorldGraphVersionRead(BaseModel):
     chunk_overlap_token_size: int | None
     entity_prompt_version: str | None
     compiler_version: str
+    parent_version_id: str | None = None
+    revision: int = 1
+    correction_head_hash: str = ""
+    change_set_id: str | None = None
+    published_at: datetime | None = None
+    superseded_at: datetime | None = None
     error_code: str | None
     error_message: str | None
     created_at: datetime
@@ -131,6 +158,12 @@ class PersonWorldProfileRead(BaseModel):
     unresolved_candidates: list[SourcedStatement]
     source_message_ids: list[str]
     compiler_version: str
+    agent_run_id: str | None = None
+    generation_summary: dict[str, object] = Field(default_factory=dict)
+    profile_v2: dict[str, object] = Field(default_factory=dict)
+    profile_v3: dict[str, object] = Field(default_factory=dict)
+    profile_schema_version: str = "v1"
+    investigation_report: dict[str, object] = Field(default_factory=dict)
     created_at: datetime
     graph: WorldGraphVersionRead
 
@@ -138,6 +171,24 @@ class PersonWorldProfileRead(BaseModel):
 class WorldBuildRead(BaseModel):
     job_id: str
     status: str
+
+
+class WorldGraphNodeRead(BaseModel):
+    id: str
+    entity_type: str | None = None
+    description: str | None = None
+
+
+class WorldGraphEdgeRead(BaseModel):
+    source: str
+    target: str
+    keywords: str | None = None
+
+
+class WorldGraphSnapshotRead(BaseModel):
+    nodes: list[WorldGraphNodeRead]
+    edges: list[WorldGraphEdgeRead]
+    truncated: bool
 
 
 class WorldSourceMessageRead(BaseModel):

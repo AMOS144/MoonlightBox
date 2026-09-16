@@ -140,7 +140,26 @@ def _enqueue_import(settings: Settings) -> tuple[str, str, str]:
             f"/api/projects/{project_id}/imports/{preview_id}/confirm",
             json={"self_participant": "乙", "target_participant": "甲"},
         ).json()
-    return project_id, confirmed["import_id"], confirmed["analysis_job_id"]
+    assert confirmed["analysis_job_id"] is None
+    # 只验证历史 Worker 兼容，显式构造历史任务；不恢复导入自动评分路径。
+    from moonlightbox.imports.analysis_job import config_fingerprint
+
+    database = Database(settings.database_url)
+    with Session(database.engine) as session:
+        snapshot = build_v3_analysis_job_snapshot(settings)
+        job = JobService(session).enqueue_unique(
+            V3_ANALYSIS_JOB_KIND,
+            {
+                "project_id": project_id,
+                "import_id": confirmed["import_id"],
+                "analysis_config": snapshot,
+                "config_fingerprint": config_fingerprint(snapshot),
+            },
+            dedupe_key=v3_analysis_dedupe_key(confirmed["import_id"], snapshot),
+        )
+        job_id = job.id
+    database.close()
+    return project_id, confirmed["import_id"], job_id
 
 
 def test_v3_snapshot_and_dedupe_include_both_prompts_and_weights(
@@ -154,8 +173,7 @@ def test_v3_snapshot_and_dedupe_include_both_prompts_and_weights(
     assert validated.analysis_version == "hybrid-v3"
     assert validated.pipeline.acceptance_threshold == 0.55
     assert (
-        validated.pipeline.global_selection_prompt_version
-        == "event-analysis-v3-global-selection-1"
+        validated.pipeline.global_selection_prompt_version == "event-analysis-v3-global-selection-1"
     )
     assert validated.pipeline.weights["evidence_quality"] == 0.25
     assert v3_analysis_dedupe_key(

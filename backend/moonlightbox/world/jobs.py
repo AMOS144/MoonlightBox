@@ -1,6 +1,6 @@
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -11,11 +11,6 @@ from sqlalchemy.orm import Session
 from moonlightbox.config import Settings
 from moonlightbox.events.cloud_client import NodeAnalysisCloudClient
 from moonlightbox.events.config import config_fingerprint, normalize_config
-from moonlightbox.imports.analysis_job import (
-    V3_ANALYSIS_JOB_KIND,
-    build_v3_analysis_job_snapshot,
-    v3_analysis_dedupe_key,
-)
 from moonlightbox.imports.models import Message, Participant
 from moonlightbox.imports.quoted_sender_preprocess import (
     build_clean_world_messages,
@@ -39,9 +34,8 @@ from moonlightbox.world.client import (
 )
 from moonlightbox.world.compiler import (
     COMPILER_VERSION,
-    BackgroundCompiler,
+    AgentCompilerClient,
     CompiledWorldProfile,
-    StructuredCompilerClient,
 )
 from moonlightbox.world.merges import (
     AliasAgentMessage,
@@ -54,6 +48,7 @@ from moonlightbox.world.models import (
     PersonWorldProfile,
     WorldGraphVersion,
 )
+from moonlightbox.world.person_world import PersonWorldAgent
 
 WORLD_BUILD_JOB_KIND = "lightrag_world_build_v1"
 WORLD_BUNDLE_VERSION = "conversation-bundle-v1"
@@ -76,6 +71,7 @@ class WorldBuildSnapshot(BaseModel):
     query_top_k: int = Field(ge=1, le=100)
     query_chunk_top_k: int = Field(ge=1, le=100)
     query_max_total_tokens: int = Field(ge=1000, le=100000)
+    person_world_section_concurrency: int = Field(ge=1, le=7)
     compiler_version: str = COMPILER_VERSION
     compiler_endpoint: str = Field(min_length=1)
     compiler_model: str = Field(min_length=1)
@@ -97,6 +93,7 @@ def build_world_job_snapshot(settings: Settings) -> dict[str, object]:
             query_top_k=settings.lightrag_query_top_k,
             query_chunk_top_k=settings.lightrag_query_chunk_top_k,
             query_max_total_tokens=settings.lightrag_query_max_total_tokens,
+            person_world_section_concurrency=settings.person_world_section_concurrency,
             compiler_endpoint=settings.node_analysis_endpoint,
             compiler_model=settings.node_analysis_model,
             compiler_response_format=settings.node_analysis_response_format,
@@ -149,7 +146,6 @@ def enqueue_world_build(
             "source_import_ids": import_ids,
             "source_fingerprint": source_digest,
             "world_config": snapshot,
-            "analysis_config": build_v3_analysis_job_snapshot(settings),
         },
         dedupe_key=dedupe_key,
     )
@@ -165,7 +161,7 @@ def create_world_build_handler(
     settings: Settings,
     *,
     lightrag_client: LightRAGSidecarClient | None = None,
-    compiler_client: StructuredCompilerClient | None = None,
+    compiler_client: AgentCompilerClient | None = None,
 ) -> JobHandler:
     def handler(service: JobService, job: Job) -> None:
         token = job.worker_token
@@ -189,9 +185,20 @@ def create_world_build_handler(
             source_import_ids=source_import_ids,
             source_digest=source_digest,
             snapshot=snapshot,
+            version_nonce=(
+                _required_string(job.payload, "request_id")
+                if (
+                    bool(job.payload.get("force_recompile"))
+                    or bool(job.payload.get("start_alias_review"))
+                )
+                and not bool(job.payload.get("compile_profile_only"))
+                else None
+            ),
         )
         existing_profile = service.session.scalar(
-            select(PersonWorldProfile).where(PersonWorldProfile.graph_version_id == graph.id)
+            select(PersonWorldProfile)
+            .where(PersonWorldProfile.node_boundary_hash.is_(None))
+            .where(PersonWorldProfile.graph_version_id == graph.id)
         )
         # 编译阶段失败后重试时，图谱和全部 Bundle 可能已经成功写入。
         # 记录这个状态，避免为了修复编译器而再次执行耗时的云端建图。
@@ -214,19 +221,16 @@ def create_world_build_handler(
                 proposal.decision = "reject"
                 proposal.review_note = "重新生成别名候选，旧提案作废。"
                 proposal.reviewed_at = datetime.now(UTC)
-        if graph.status == "ready" and existing_profile is not None and not force_recompile and not start_alias_review:
-            analysis_job = _enqueue_downstream_analysis(
+        if graph.status == "ready" and not force_recompile and not start_alias_review:
+            analysis_job = _enqueue_node_investigation(
                 service,
                 project_id=project_id,
-                import_id=trigger_import_id,
-                snapshot=job.payload.get("analysis_config"),
             )
             service.checkpoint(
                 job.id,
                 {
                     "stage": "world_ready",
                     "progress": 1.0,
-                    "profile_id": existing_profile.id,
                     "analysis_job_id": analysis_job.id,
                 },
                 token=token,
@@ -258,6 +262,9 @@ def create_world_build_handler(
             )
             service.session.commit()
             bundle_messages = build_clean_world_messages(messages, quoted_sender_observations)
+            from moonlightbox.world.bundles import chronological_source_order
+
+            source_order = chronological_source_order(messages)
             bundles = build_conversation_bundles(
                 bundle_messages,
                 project_id=project_id,
@@ -290,10 +297,7 @@ def create_world_build_handler(
             # 合并 LightRAG 实体后只需重新查询并编译档案；图谱本身已经存在，
             # 不要因为 force_recompile 再次索引聊天 Bundle。
             reuse_index = (
-                graph_was_failed
-                or force_recompile
-                or compile_profile_only
-                or start_alias_review
+                graph_was_failed or force_recompile or compile_profile_only or start_alias_review
             ) and current_bundle_ids.issubset(indexed_bundle_ids)
 
             if reuse_index:
@@ -328,6 +332,8 @@ def create_world_build_handler(
                                 id=item.document_id,
                                 source=item.source_name,
                                 text=item.content,
+                                source_version=source_digest,
+                                message_spans=item.source_spans(source_order),
                             )
                             for item in batch
                         ],
@@ -389,14 +395,6 @@ def create_world_build_handler(
                     max_output_tokens=snapshot.compiler_max_output_tokens,
                 )
                 structured_compiler = owned_compiler
-            compiler = BackgroundCompiler(
-                sidecar,
-                structured_compiler,
-                top_k=snapshot.query_top_k,
-                chunk_top_k=snapshot.query_chunk_top_k,
-                max_total_tokens=snapshot.query_max_total_tokens,
-            )
-
             # 首次建图只走到别名审核：不编译人物档案，避免用户在确认前
             # 看到尚未完成实体归并的 PersonWorldProfile。
             if not compile_profile_only:
@@ -414,6 +412,8 @@ def create_world_build_handler(
                         for item in bundle.messages
                     ]
                     candidates = generate_merge_candidates(
+                        project_id=project_id,
+                        session=service.session,
                         sidecar=sidecar,
                         compiler=structured_compiler,
                         workspace=graph.workspace_key,
@@ -430,17 +430,23 @@ def create_world_build_handler(
                         )
                 except LightRAGSidecarError:
                     raise
-                except Exception:
-                    candidates = []
+                except Exception as error:
+                    raise JobHandlerError(
+                        getattr(error, "code", "alias_resolution_failed"),
+                        "别名调查未完成，不能按无候选继续编译；请恢复或重试任务。",
+                    ) from error
 
-                pending_count = service.session.scalar(
-                    select(func.count())
-                    .select_from(EntityMergeProposal)
-                    .where(
-                        EntityMergeProposal.graph_version_id == graph.id,
-                        EntityMergeProposal.decision == "pending",
+                pending_count = (
+                    service.session.scalar(
+                        select(func.count())
+                        .select_from(EntityMergeProposal)
+                        .where(
+                            EntityMergeProposal.graph_version_id == graph.id,
+                            EntityMergeProposal.decision == "pending",
+                        )
                     )
-                ) or 0
+                    or 0
+                )
                 if pending_count > 0:
                     graph.status = "awaiting_alias_review"
                     graph.completed_at = None
@@ -457,53 +463,82 @@ def create_world_build_handler(
                     )
                     return
 
-            source_map = {
-                bundle.source_name: [item.message.id for item in bundle.messages]
-                for bundle in bundles
-            }
-
-            def report_compiler_progress(completed: int, total: int) -> None:
+                # 新项目的主流程在共享图谱可查询后直接调查起点。全量人物背景
+                # 不是前置条件；人物背景只在用户批准具体节点后按 node_scope 编译。
+                graph.status = "ready"
+                graph.completed_at = datetime.now(UTC)
+                graph.error_code = None
+                graph.error_message = None
+                service.session.commit()
+                analysis_job = _enqueue_node_investigation(service, project_id=project_id)
                 service.checkpoint(
                     job.id,
                     {
-                        "stage": "compiling_profile",
-                        "progress": 0.60 + 0.30 * completed / total,
+                        "stage": "world_ready",
+                        "progress": 1.0,
+                        "bundle_count": len(bundles),
+                        "analysis_job_id": analysis_job.id,
+                    },
+                    token=token,
+                )
+                return
+
+            def report_agent_progress(stage: str, completed: int, total: int) -> None:
+                service.checkpoint(
+                    job.id,
+                    {
+                        "stage": stage,
+                        "progress": 0.60 + 0.25 * completed / max(1, total),
                         "completed_questions": completed,
                         "question_count": total,
                     },
                     token=token,
                 )
 
-            compiled = compiler.compile(
-                workspace=graph.workspace_key,
-                project_id=project_id,
+            agent_result = PersonWorldAgent(
+                session=service.session,
+                graph=graph,
+                lightrag=sidecar,
+                compiler=structured_compiler,
                 subject_name=subject.participant_name,
                 user_name=user.participant_name,
-                source_messages_by_document=source_map,
-                progress=report_compiler_progress,
+                top_k=snapshot.query_top_k,
+                chunk_top_k=snapshot.query_chunk_top_k,
+                max_total_tokens=snapshot.query_max_total_tokens,
+                section_concurrency=snapshot.person_world_section_concurrency,
+                progress=report_agent_progress,
+            ).run(
+                mode="recompile" if compile_profile_only else "initial_compile",
+                resume_key=f"job:{job.id}",
+            )
+            compiled = CompiledWorldProfile(
+                draft=agent_result.draft,
+                source_message_ids=agent_result.source_message_ids,
+                retrieval_manifest=agent_result.retrieval_manifest,
             )
             profile = _persist_profile(
                 service.session,
                 graph=graph,
                 subject_person_id=subject.participant_id,
                 compiled=compiled,
+                agent_run_id=agent_result.run_id,
+                generation_summary=agent_result.generation_summary,
+                profile_v3=agent_result.profile_v3.model_dump(mode="json"),
+                profile_schema_version="v3",
+                investigation_report=agent_result.investigation_report.model_dump(mode="json"),
             )
-            graph.status = "ready"
+            # Agent 产物必须先由用户审核。此时图谱和 Profile 都只是候选，
+            # 不能启动 Runtime 或下游节点分析。
+            graph.status = "awaiting_profile_review"
             graph.completed_at = datetime.now(UTC)
             service.session.commit()
-            analysis_job = _enqueue_downstream_analysis(
-                service,
-                project_id=project_id,
-                import_id=trigger_import_id,
-                snapshot=job.payload.get("analysis_config"),
-            )
             service.checkpoint(
                 job.id,
                 {
-                    "stage": "world_ready",
+                    "stage": "awaiting_profile_review",
                     "progress": 1.0,
                     "profile_id": profile.id,
-                    "analysis_job_id": analysis_job.id,
+                    "agent_run_id": agent_result.run_id,
                     "bundle_count": len(bundles),
                 },
                 token=token,
@@ -512,6 +547,8 @@ def create_world_build_handler(
             _mark_graph_failed(service.session, graph, error.code, error.safe_message)
             raise
         except LightRAGSidecarError as error:
+            if error.details:
+                job.checkpoint = {**(job.checkpoint or {}), 'index_failure': error.details}
             _mark_graph_failed(service.session, graph, error.code, error.safe_message)
             raise JobHandlerError(error.code, error.safe_message) from error
         except Exception as error:
@@ -538,7 +575,7 @@ def _persist_merge_proposals(
     *,
     project_id: str,
     graph: WorldGraphVersion,
-    candidates: list[object],
+    candidates: Sequence[object],
 ) -> None:
     """幂等保存 pending 提案，不自动接受任何提案。"""
     existing = {
@@ -599,6 +636,7 @@ def load_world_messages(
             timestamp=message.timestamp,
             kind=message.kind,
             content=message.content,
+            source_id=message.source_id,
         )
         for message, participant in session.execute(statement).all()
     ]
@@ -619,8 +657,15 @@ def _ensure_graph_version(
     source_import_ids: list[str],
     source_digest: str,
     snapshot: WorldBuildSnapshot,
+    version_nonce: str | None = None,
 ) -> WorldGraphVersion:
     snapshot_fingerprint = config_fingerprint(snapshot.model_dump(mode="json"))
+    if version_nonce is not None:
+        # 手动重建必须得到新的不可变 workspace。request_id 只用于打破
+        # (source, config) 唯一键，不改变真正的模型/切块配置快照。
+        snapshot_fingerprint = hashlib.sha256(
+            f"{snapshot_fingerprint}:{version_nonce}".encode()
+        ).hexdigest()
     existing = session.scalar(
         select(WorldGraphVersion).where(
             WorldGraphVersion.project_id == project_id,
@@ -704,12 +749,24 @@ def _persist_profile(
     graph: WorldGraphVersion,
     subject_person_id: str,
     compiled: CompiledWorldProfile,
+    agent_run_id: str | None = None,
+    generation_summary: dict[str, object] | None = None,
+    profile_v2: dict[str, object] | None = None,
+    profile_v3: dict[str, object] | None = None,
+    profile_schema_version: str = "v1",
+    investigation_report: dict[str, object] | None = None,
 ) -> PersonWorldProfile:
+    node_hash = ((generation_summary or {}).get("node_scope") or {}).get("preview_hash")
     existing = session.scalar(
-        select(PersonWorldProfile).where(PersonWorldProfile.graph_version_id == graph.id)
+        select(PersonWorldProfile).where(
+            PersonWorldProfile.node_boundary_hash == node_hash,
+            PersonWorldProfile.graph_version_id == graph.id,
+            *([PersonWorldProfile.agent_run_id == agent_run_id] if node_hash else []),
+        )
     )
     draft = compiled.draft.model_dump(mode="json")
     values = {
+        "node_boundary_hash": node_hash,
         "identity": draft["identity"],
         "work_and_education": draft["work_and_education"],
         "places": draft["places"],
@@ -731,6 +788,12 @@ def _persist_profile(
             for item in compiled.retrieval_manifest
         ],
         "compiler_version": COMPILER_VERSION,
+        "agent_run_id": agent_run_id,
+        "generation_summary": generation_summary or {},
+        "profile_v2": profile_v2 or {},
+        "profile_v3": profile_v3 or {},
+        "profile_schema_version": profile_schema_version,
+        "investigation_report": investigation_report or {},
     }
     if existing is None:
         existing = PersonWorldProfile(
@@ -747,32 +810,17 @@ def _persist_profile(
     return existing
 
 
-def _enqueue_downstream_analysis(
+def _enqueue_node_investigation(
     service: JobService,
     *,
     project_id: str,
-    import_id: str,
-    snapshot: object,
 ) -> Job:
-    if not isinstance(snapshot, Mapping):
-        raise JobHandlerError("world_analysis_config_invalid", "后续节点分析配置快照无效")
-    normalized_snapshot = normalize_config(dict(snapshot))
-    job = service.enqueue_unique(
-        V3_ANALYSIS_JOB_KIND,
-        {
-            "project_id": project_id,
-            "import_id": import_id,
-            "analysis_config": normalized_snapshot,
-            "config_fingerprint": config_fingerprint(normalized_snapshot),
-        },
-        dedupe_key=v3_analysis_dedupe_key(import_id, normalized_snapshot),
-    )
-    if job.status not in {"failed", "interrupted"}:
-        return job
-    try:
-        return service.resume(job.id)
-    except InvalidJobTransitionError:
-        return service.get(job.id)
+    """资料发布后进入新的调查工作台，不再启动旧事件评分流水线。"""
+    from moonlightbox.node_investigation.store import InvestigationStore
+
+    service.session.commit()
+    result = InvestigationStore(service.session.get_bind(), project_id).start("Asia/Shanghai")
+    return service.get(result["job_id"])
 
 
 def _mark_graph_failed(

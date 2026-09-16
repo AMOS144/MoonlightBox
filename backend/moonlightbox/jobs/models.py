@@ -13,11 +13,11 @@ class Job(Base):
     __table_args__ = (
         Index("ux_jobs_dedupe_key", "dedupe_key", unique=True),
         CheckConstraint(
-            "(status = 'running' "
+            "(status IN ('running', 'cancelling') "
             "AND worker_token IS NOT NULL "
             "AND length(trim(worker_token)) > 0 "
             "AND lease_expires_at IS NOT NULL) OR "
-            "(status != 'running' "
+            "(status NOT IN ('running', 'cancelling') "
             "AND worker_token IS NULL "
             "AND lease_expires_at IS NULL)",
             name="ck_jobs_lease_fields",

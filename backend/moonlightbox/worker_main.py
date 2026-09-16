@@ -1,7 +1,7 @@
 import logging
 import os
 import signal
-from threading import Event
+from threading import Event, Thread
 from time import monotonic
 
 from moonlightbox.config import Settings
@@ -14,7 +14,10 @@ from moonlightbox.imports.analysis_job import (
     create_event_analysis_v3_handler,
 )
 from moonlightbox.jobs.registry import JobHandler, JobRegistry
-from moonlightbox.runtime_v1.inference_client import RuntimeInferenceClient
+from moonlightbox.model_settings import apply_saved_agent_settings
+from moonlightbox.node_investigation.jobs import create_investigation_handler
+from moonlightbox.node_investigation.store import JOB_KIND as NODE_INVESTIGATION_JOB_KIND
+from moonlightbox.observability import initialize_phoenix, shutdown_phoenix
 from moonlightbox.runtime_v1.jobs import (
     RUNTIME_CYCLE_JOB_KIND,
     create_runtime_cycle_handler,
@@ -27,6 +30,28 @@ from moonlightbox.spatial.jobs import (
 from moonlightbox.training.confirmation import TRAINING_JOB_KIND
 from moonlightbox.worker import Worker, recover_interrupted_jobs
 from moonlightbox.world.jobs import WORLD_BUILD_JOB_KIND, create_world_build_handler
+from moonlightbox.world.person_world.jobs import (
+    PERSON_WORLD_PROFILE_RECOMPILE_JOB_KIND,
+    WORLD_GRAPH_PATCH_JOB_KIND,
+    create_graph_patch_handler,
+    create_profile_recompile_handler,
+)
+from moonlightbox.world.person_world.node_jobs import (
+    NODE_PROFILE_JOB_KIND,
+    create_node_compilation_handler,
+)
+from moonlightbox.world.person_world.review import (
+    REVISION_TURN_JOB_KIND,
+    create_revision_turn_handler,
+)
+from moonlightbox.world.person_world.review.profile_preview_jobs import (
+    PROFILE_PREVIEW_JOB_KIND,
+    create_profile_preview_handler,
+)
+from moonlightbox.world.person_world.section_retry import (
+    PERSON_WORLD_SECTION_RETRY_JOB_KIND,
+    create_section_retry_handler,
+)
 
 IDLE_SLEEP_SECONDS = 0.25
 # Worker 在租约尚未到期时重启是正常情况（例如 systemd 自动重启）。
@@ -34,10 +59,17 @@ IDLE_SLEEP_SECONDS = 0.25
 INTERRUPTED_JOB_RECOVERY_INTERVAL_SECONDS = 5.0
 LOGGER = logging.getLogger(__name__)
 BACKGROUND_JOB_KINDS = {
+    NODE_PROFILE_JOB_KIND,
+    NODE_INVESTIGATION_JOB_KIND,
     ANALYSIS_JOB_KIND,
     V3_ANALYSIS_JOB_KIND,
     SPATIAL_ANALYSIS_JOB_KIND,
     WORLD_BUILD_JOB_KIND,
+    WORLD_GRAPH_PATCH_JOB_KIND,
+    PERSON_WORLD_PROFILE_RECOMPILE_JOB_KIND,
+    PERSON_WORLD_SECTION_RETRY_JOB_KIND,
+    REVISION_TURN_JOB_KIND,
+    PROFILE_PREVIEW_JOB_KIND,
     RUNTIME_CYCLE_JOB_KIND,
 }
 
@@ -63,7 +95,7 @@ def allowed_job_kinds_for_role(role: str) -> set[str] | None:
 def role_scans_due_wakeups(role: str) -> bool:
     """Runtime cycle 与全功能 Worker 扫描虚拟时钟唤醒。"""
 
-    return role in {"cognition", "all"}
+    return role in {"realtime", "cognition", "background", "all"}
 
 
 def scan_due_runtime_wakeups(database: Database) -> int:
@@ -131,6 +163,9 @@ def main() -> None:
 
     settings = Settings()
     worker_role = os.environ.get("MOONLIGHTBOX_WORKER_ROLE", "all").strip().lower()
+    # PersonWorld、Revision 与 Runtime Cycle 都在独立 Worker 中执行；这里的初始化
+    # 让它们与 API 共享同一 Phoenix project，又以 role 作为可筛选的 service 标签。
+    initialize_phoenix(settings, service_name=f"worker:{worker_role}")
     allowed_kinds = allowed_job_kinds_for_role(worker_role)
     database = Database(settings.database_url)
     stop_event = Event()
@@ -141,8 +176,15 @@ def main() -> None:
     previous_sigint = signal.signal(signal.SIGINT, request_stop)
     previous_sigterm = signal.signal(signal.SIGTERM, request_stop)
     registry = JobRegistry()
+    # 普通 Runtime / PersonWorld Worker 不做模型验收，不应仅因注册训练
+    # handler 就加载本地 embedding。否则每个开发 Worker 都会白占一份内存。
+    training_enabled_for_role = allowed_kinds is None or TRAINING_JOB_KIND in allowed_kinds
     embedding_root = settings.model_dir / "embeddings" / "fastembed-bge-small-zh-v1.5"
-    embedder = LocalChineseEmbedder(embedding_root) if embedding_root.is_dir() else None
+    embedder = (
+        LocalChineseEmbedder(embedding_root)
+        if training_enabled_for_role and embedding_root.is_dir()
+        else None
+    )
     registry.register(
         ANALYSIS_JOB_KIND,
         create_event_analysis_v2_handler(
@@ -166,17 +208,32 @@ def main() -> None:
         create_world_build_handler(settings),
     )
     registry.register(
-        TRAINING_JOB_KIND,
-        create_platform_training_handler(settings, embedder),
-    )
-    persona_client = RuntimeInferenceClient(
-        settings.persona_inference_url,
-        settings.persona_inference_token.get_secret_value(),
-        timeout=settings.persona_inference_timeout_seconds,
+        WORLD_GRAPH_PATCH_JOB_KIND,
+        create_graph_patch_handler(settings),
     )
     registry.register(
+        PERSON_WORLD_PROFILE_RECOMPILE_JOB_KIND,
+        create_profile_recompile_handler(settings),
+    )
+    registry.register(
+        PERSON_WORLD_SECTION_RETRY_JOB_KIND,
+        create_section_retry_handler(settings),
+    )
+    registry.register(
+        REVISION_TURN_JOB_KIND,
+        create_revision_turn_handler(settings),
+    )
+    registry.register(PROFILE_PREVIEW_JOB_KIND, create_profile_preview_handler(settings))
+    registry.register(NODE_INVESTIGATION_JOB_KIND, create_investigation_handler(settings))
+    registry.register(NODE_PROFILE_JOB_KIND, create_node_compilation_handler(settings))
+    if training_enabled_for_role:
+        registry.register(
+            TRAINING_JOB_KIND,
+            create_platform_training_handler(settings, embedder),
+        )
+    registry.register(
         RUNTIME_CYCLE_JOB_KIND,
-        create_runtime_cycle_handler(persona_client=persona_client),
+        create_runtime_cycle_handler(settings=settings),
     )
     worker = Worker(
         database,
@@ -184,24 +241,49 @@ def main() -> None:
         stop_event=stop_event,
         allowed_kinds=allowed_kinds,
     )
-    next_runtime_wakeup_scan = monotonic()
-    next_interrupted_job_recovery_scan = monotonic()
+
+    def scan_runtime_loop():
+        """扫描独立于耗时 Agent，使用自己的数据库会话，不执行模型或训练。"""
+        next_tick = monotonic()
+        while not stop_event.is_set():
+            scan_due_runtime_wakeups(database)
+            # 固定节拍；扫描跨拍则跳过过期拍，不补跑积压的扫描任务。
+            next_tick += 3.0
+            now = monotonic()
+            if next_tick <= now:
+                next_tick += (int((now - next_tick) // 3.0) + 1) * 3.0
+            stop_event.wait(max(0.0, next_tick - now))
+
+    runtime_scanner = None
+    if role_scans_due_wakeups(worker_role):
+        runtime_scanner = Thread(target=scan_runtime_loop, name="runtime-scheduler", daemon=True)
+        runtime_scanner.start()
+    def scan_recovery_loop():
+        while not stop_event.is_set():
+            scan_interrupted_jobs(database)
+            stop_event.wait(INTERRUPTED_JOB_RECOVERY_INTERVAL_SECONDS)
+
+    recovery_scanner = Thread(target=scan_recovery_loop, name="job-recovery", daemon=True)
+    recovery_scanner.start()
     try:
         recover_interrupted_jobs(database)
+        settings_path = settings.data_dir / "agent-model-settings.json"
+        settings_mtime_ns = -1
         while not stop_event.is_set():
-            if role_scans_due_wakeups(worker_role) and monotonic() >= next_runtime_wakeup_scan:
-                scan_due_runtime_wakeups(database)
-                next_runtime_wakeup_scan = monotonic() + 1.0
-            if monotonic() >= next_interrupted_job_recovery_scan:
-                scan_interrupted_jobs(database)
-                next_interrupted_job_recovery_scan = (
-                    monotonic() + INTERRUPTED_JOB_RECOVERY_INTERVAL_SECONDS
-                )
+            current_mtime_ns = settings_path.stat().st_mtime_ns if settings_path.exists() else 0
+            if current_mtime_ns != settings_mtime_ns:
+                apply_saved_agent_settings(settings)
+                settings_mtime_ns = current_mtime_ns
             if not worker.run_once():
                 stop_event.wait(IDLE_SLEEP_SECONDS)
     finally:
+        stop_event.set()
+        recovery_scanner.join(timeout=5)
+        if runtime_scanner is not None:
+            runtime_scanner.join(timeout=5)
         signal.signal(signal.SIGINT, previous_sigint)
         signal.signal(signal.SIGTERM, previous_sigterm)
+        shutdown_phoenix()
         database.close()
 
 

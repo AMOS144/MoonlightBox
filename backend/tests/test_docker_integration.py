@@ -87,7 +87,10 @@ def test_compose_backend_processes_share_runtime_configuration_and_volumes() -> 
             "sqlite:////app/data/moonlightbox.db"
         )
         assert service["environment"]["MOONLIGHTBOX_AUTO_CREATE_SCHEMA"] == "false"
-        assert "./data:/app/data" in service["volumes"]
+        assert (
+            "${MOONLIGHTBOX_HOST_DATA_DIR:-../.runtime-data/data}:/app/data"
+            in service["volumes"]
+        )
         assert "./models:/app/models" in service["volumes"]
 
     assert "MOONLIGHTBOX_NODE_ANALYSIS_API_KEY" not in backend["environment"]

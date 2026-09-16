@@ -38,6 +38,8 @@ def test_upgrade_creates_projects_table(tmp_path: Path) -> None:
         "conversation_bundles",
         "conversation_bundle_messages",
         "person_world_profiles",
+        "runtime_initializations",
+        "node_investigations",
     }.issubset(tables)
 
 
@@ -66,7 +68,9 @@ def test_actor_typing_timeout_migration(tmp_path: Path) -> None:
     config = Config("backend/alembic.ini")
     config.set_main_option("sqlalchemy.url", database_url)
 
-    command.upgrade(config, "head")
+    # 0041 已有意删除 ConversationActor 表；这里验收的是 0023 当时的历史契约，
+    # 不能把升级到当前 Runtime v1 后仍保留旧表当作通过条件。
+    command.upgrade(config, "0023_add_assistant_typing_timeout")
 
     columns = {
         column["name"]
@@ -82,7 +86,8 @@ def test_state_field_provenance_migration(tmp_path: Path) -> None:
     config = Config("backend/alembic.ini")
     config.set_main_option("sqlalchemy.url", database_url)
 
-    command.upgrade(config, "head")
+    # branch_state_versions 属于在 0041 退役的旧运行时，验证其历史迁移而非 head。
+    command.upgrade(config, "0027_state_field_provenance")
 
     columns = {
         column["name"]
@@ -100,7 +105,8 @@ def test_subject_cognitive_agent_migration_creates_tables_columns_and_indexes(
     config = Config("backend/alembic.ini")
     config.set_main_option("sqlalchemy.url", database_url)
 
-    command.upgrade(config, "head")
+    # Subject Cognitive Agent 被 0041 整体退役。本测试只覆盖 0024 的创建合同。
+    command.upgrade(config, "0024_subject_cognitive_agent")
 
     inspector = inspect(create_engine(database_url))
     expected_columns = {
@@ -216,7 +222,7 @@ def test_subject_cognitive_agent_migration_is_reversible(tmp_path: Path) -> None
     config = Config("backend/alembic.ini")
     config.set_main_option("sqlalchemy.url", database_url)
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "0024_subject_cognitive_agent")
     command.downgrade(config, "0023_add_assistant_typing_timeout")
 
     inspector = inspect(create_engine(database_url))
@@ -269,7 +275,8 @@ def test_0010_migrates_legacy_running_jobs_and_remains_reversible(
         )
     old_engine.dispose()
 
-    command.upgrade(config, "head")
+    # 此处验证 0010 的数据迁移与可逆性。不能从 head 回退，因为 0041 明确不可逆。
+    command.upgrade(config, "0010_add_job_lease_and_dedupe")
     upgraded_engine = create_engine(database_url)
     upgraded_metadata = MetaData()
     upgraded_metadata.reflect(upgraded_engine)
@@ -293,7 +300,7 @@ def test_0010_migrates_legacy_running_jobs_and_remains_reversible(
     upgraded_engine.dispose()
 
     command.downgrade(config, "0009_add_analysis_run_lease")
-    command.upgrade(config, "head")
+    command.upgrade(config, "0010_add_job_lease_and_dedupe")
 
     database = Database(database_url)
     assert recover_interrupted_jobs(database) == 1
@@ -643,7 +650,9 @@ def test_analysis_run_downgrade_removes_import_parent_index(tmp_path: Path) -> N
     database_url = f"sqlite:///{tmp_path / 'downgrade.db'}"
     config = Config("backend/alembic.ini")
     config.set_main_option("sqlalchemy.url", database_url)
-    command.upgrade(config, "head")
+    # 这是 0007 的历史 schema 回滚测试。0041 明确不可逆，不能从当前 head 跨过它
+    # 回退到 0006；只升级到本用例需要验证的 revision 才能准确覆盖该契约。
+    command.upgrade(config, "0007_create_analysis_runs")
     upgraded = inspect(create_engine(database_url))
     assert any(
         index["unique"] and tuple(index["column_names"]) == ("id", "project_id")

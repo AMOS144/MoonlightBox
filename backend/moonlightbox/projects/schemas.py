@@ -16,3 +16,5 @@ class ProjectRead(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+    target_name: str | None = None
+    target_avatar_asset_id: str | None = None

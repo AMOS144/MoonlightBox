@@ -158,7 +158,7 @@ def create_persona_runtime_app(
 
     @app.post("/v1/inference/runtime-actor", dependencies=[authentication])
     def runtime_actor(payload: _InferenceRequestPayload) -> dict[str, object]:
-        """Runtime PersonaActor 的原始结构化表达入口，固定使用当前 LoRA。"""
+        """Runtime PersonaActor 的原始结构化表达入口，体验阶段仅使用基础模型。"""
 
         return execute(payload, "runtime_actor")
 

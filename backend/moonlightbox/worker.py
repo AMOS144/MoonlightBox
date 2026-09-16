@@ -82,7 +82,20 @@ class Worker:
                 return True
 
             try:
-                handler(service, running)
+                from moonlightbox.agent_runtime.cancellation import cancellation_scope, job_signal
+                from moonlightbox.agent_runtime.persistence import job_recovery_scope
+
+                try:
+                    with (
+                        cancellation_scope(job_signal(self._database.engine, job_id, token)),
+                        job_recovery_scope(job_kind == "runtime-v1-cycle"),
+                    ):
+                        handler(service, running)
+                finally:
+                    # 只有执行栈真正退出后才确认停止；不能把取消请求等同于已停止。
+                    if job_signal(self._database.engine, job_id, token)():
+                        session.rollback()
+                        service.acknowledge_cancellation(job_id, token=token)
             except JobHandlerError as error:
                 lease_done.set()
                 lease_thread.join()
@@ -94,14 +107,20 @@ class Worker:
                     token=token,
                 )
                 return True
-            except Exception:
+            except Exception as error:
                 lease_done.set()
                 lease_thread.join()
                 session.rollback()
+                if service.get(job_id).status == "cancelled":
+                    # 取消回执已写入；不要再把正常退出报告成后台故障。
+                    return True
+                import logging
+
+                logging.getLogger(__name__).exception("后台任务 %s 失败", job_id)
                 service.fail(
                     job_id,
-                    "job_handler_failed",
-                    "任务处理失败",
+                    str(getattr(error, "code", "") or type(error).__name__),
+                    "任务处理失败，具体异常已记录到服务日志",
                     token=token,
                 )
                 return True
@@ -199,6 +218,7 @@ def recover_interrupted_jobs(database: Database) -> int:
     now = datetime.now(UTC)
     with Session(database.engine) as session:
         service = JobService(session, lock_retries=database.lock_retries)
+        service.finish_expired_cancellations(now=now)
         recovered = service.recover_worker_interrupted()
         running_jobs = list(
             session.scalars(

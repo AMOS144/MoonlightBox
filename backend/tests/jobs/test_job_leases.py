@@ -1,12 +1,13 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Barrier, Thread
+from time import sleep
 
 import pytest
 from moonlightbox.db import Database
 from moonlightbox.jobs.models import Job
 from moonlightbox.jobs.service import JobLeaseLostError, JobService
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 
@@ -142,6 +143,39 @@ def test_enqueue_unique_is_atomic_across_sessions(tmp_path: Path) -> None:
     assert len(set(ids)) == 1
     with Session(database.engine) as session:
         assert session.query(Job).count() == 1
+
+
+def test_enqueue_unique_retries_when_sqlite_is_briefly_write_locked(tmp_path: Path) -> None:
+    database = Database(
+        f"sqlite:///{tmp_path / 'enqueue-locked.db'}",
+        busy_timeout_ms=10,
+        lock_retries=3,
+    )
+    Job.metadata.create_all(database.engine)
+    locked = database.engine.connect()
+    locked.exec_driver_sql("BEGIN IMMEDIATE")
+
+    def release_lock() -> None:
+        # 第一轮写入会遇到锁；随后放开锁，验证入队会重试而非报“找不到幂等记录”。
+        sleep(0.02)
+        locked.rollback()
+        locked.close()
+
+    releaser = Thread(target=release_lock)
+    releaser.start()
+    try:
+        with Session(database.engine) as session:
+            job = JobService(session, lock_retries=3).enqueue_unique(
+                "sample",
+                {"project_id": "project-1"},
+                dedupe_key="sample:project-1",
+            )
+    finally:
+        releaser.join()
+
+    assert job.status == "queued"
+    with Session(database.engine) as session:
+        assert session.scalar(select(Job.id).where(Job.dedupe_key == "sample:project-1")) == job.id
 
 
 def test_database_enables_wal_and_busy_timeout_for_file_sqlite(tmp_path: Path) -> None:

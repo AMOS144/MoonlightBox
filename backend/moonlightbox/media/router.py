@@ -1,5 +1,4 @@
 from collections.abc import Iterator
-from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,6 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from moonlightbox.config import Settings
 from moonlightbox.db import Database
 from moonlightbox.imports.models import Participant
 from moonlightbox.media.models import MediaAsset, MediaSemanticAnnotation
@@ -48,9 +48,12 @@ def _annotation_payload(annotation: MediaSemanticAnnotation) -> dict[str, object
     }
 
 
-def create_media_router(data_dir: Path, database: Database) -> APIRouter:
+def create_media_router(settings: Settings, database: Database) -> APIRouter:
     router = APIRouter(prefix="/api/projects/{project_id}/media", tags=["media"])
-    store = MediaStore(data_dir)
+    store = MediaStore(
+        settings.data_dir,
+        read_only_source_dir=settings.media_read_only_source_dir,
+    )
 
     def get_session() -> Iterator[Session]:
         yield from database.session()

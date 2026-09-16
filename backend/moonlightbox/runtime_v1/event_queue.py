@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any, cast
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .db_models import RuntimeEventRow
@@ -42,43 +41,13 @@ class RuntimeEventQueue:
             event_type=event_type,
             payload=payload,
             idempotency_key=idempotency_key,
-            occurred_at=occurred_at or datetime.now(UTC),
+            occurred_at=(
+                occurred_at.replace(tzinfo=UTC)
+                if occurred_at and occurred_at.tzinfo is None
+                else occurred_at or datetime.now(UTC)
+            ).astimezone(UTC),
             priority=priority,
         )
         self.session.add(row)
         self.session.flush()
         return row
-
-    def claim(self, branch_id: str, *, limit: int = 16) -> list[RuntimeEventRow]:
-        """CAS 领取简单批次，避免备用维护调用重复执行同一事件。"""
-
-        rows = list(
-            self.session.scalars(
-                select(RuntimeEventRow)
-                .where(RuntimeEventRow.branch_id == branch_id, RuntimeEventRow.status == "queued")
-                .order_by(RuntimeEventRow.priority.desc(), RuntimeEventRow.occurred_at)
-                .limit(limit)
-            )
-        )
-        now = datetime.now(UTC)
-        claimed_rows: list[RuntimeEventRow] = []
-        for row in rows:
-            result = cast(
-                Any,
-                self.session.execute(
-                    update(RuntimeEventRow)
-                    .where(RuntimeEventRow.id == row.id, RuntimeEventRow.status == "queued")
-                    .values(status="claimed", claimed_at=now)
-                ),
-            )
-            if result.rowcount == 1:
-                claimed_rows.append(row)
-        self.session.flush()
-        return claimed_rows
-
-    def complete(self, rows: list[RuntimeEventRow]) -> None:
-        now = datetime.now(UTC)
-        for row in rows:
-            row.status = "completed"
-            row.completed_at = now
-        self.session.flush()

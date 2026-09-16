@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from moonlightbox.events.models import EventNode
-from moonlightbox.personas.models import IdentityKernel
-from moonlightbox.world.models import ConversationBundle, PersonWorldProfile, WorldGraphVersion
+from moonlightbox.observability.runtime import observed_stage
+from moonlightbox.world.models import (
+    ConversationBundle,
+    PersonWorldProfile,
+    WorldGraphVersion,
+    WorldPublication,
+)
 
 from .branch_models import Branch, BranchMessage
 from .clock import create_clock
@@ -27,8 +34,14 @@ from .db_models import (
 )
 from .event_queue import RuntimeEventQueue
 from .memory import MemoryService
-from .planning import generate_day_plan
-from .schemas import ActorMessage, LifeDecision, LifeState, MemoryRecord, VirtualClock
+from .schemas import (
+    ActorMessage,
+    DayPlanProposal,
+    LifeDecision,
+    LifeState,
+    MemoryRecord,
+    VirtualClock,
+)
 
 
 class RuntimeWorldUnavailableError(RuntimeError):
@@ -38,33 +51,124 @@ class RuntimeWorldUnavailableError(RuntimeError):
 class RuntimeExecutor:
     """负责校验、幂等和事务写入，不调用模型也不理解自然语言。"""
 
+    def commit_initial_state(self, branch_id, expected_state_id, value, allowed, now):
+        """仅准备态可提交，事务失败不能留下半份初始化结果。"""
+        from copy import deepcopy
+        from uuid import uuid4
+
+        from .branch_models import BranchMessage
+        from .subjective_state import apply_update
+
+        branch = self.session.get(Branch, branch_id)
+        current = self._current_state(branch_id)
+        if (
+            branch.lifecycle_status not in {"preparing", "prepare_failed"}
+            or current.id != expected_state_id
+        ):
+            raise ValueError("初始化起点已变化，不能覆盖当前状态")
+        if self.session.scalar(
+            select(BranchMessage.id).where(BranchMessage.branch_id == branch_id).limit(1)
+        ):
+            raise ValueError("已开始聊天，不能重置起点")
+        if current.state.get("subjective_state"):
+            raise ValueError("已存在心理状态，不能被初始化覆盖")
+        entries = [*value.open_conversation_threads, *value.active_commitments]
+        if any(set(item.source_refs) - allowed for item in entries):
+            raise ValueError("初始化引用越界")
+        state = deepcopy(current.state)
+        state["subjective_state"] = apply_update(None, value.subjective_state, allowed, now)
+        state["open_conversation_threads"] = [
+            {**item.model_dump(mode="json"), "id": str(uuid4()), "status": "active"}
+            for item in value.open_conversation_threads
+        ]
+        state["active_commitments"] = [
+            {**item.model_dump(mode="json"), "id": str(uuid4()), "status": "active"}
+            for item in value.active_commitments
+        ]
+        state.update(version=current.version + 1, reason="director_initialization")
+        payload = {
+            column.name: getattr(current, column.name)
+            for column in RuntimeLifeStateRow.__table__.columns
+            if column.name
+            not in {"id", "created_at", "state", "version", "previous_version_id", "reason"}
+        }
+        changed = self.session.execute(
+            update(RuntimeLifeStateRow)
+            .where(
+                RuntimeLifeStateRow.id == expected_state_id,
+                RuntimeLifeStateRow.is_current.is_(True),
+            )
+            .values(is_current=False)
+        )
+        if changed.rowcount != 1:
+            raise ValueError("初始化状态版本已被其他事务更新")
+        self.session.add(
+            RuntimeLifeStateRow(
+                **payload,
+                state=state,
+                version=state["version"],
+                previous_version_id=current.id,
+                reason="director_initialization",
+            )
+        )
+        self.session.flush()
+
+    def commit_simulated_event(self, row, **kwargs):
+        """模拟生活的唯一副作用入口，调用方负责提交或回滚同一事务。"""
+        from .life_events.commit import commit_simulated_event
+
+        return commit_simulated_event(self, row, **kwargs)
+
     def __init__(self, session: Session) -> None:
         self.session = session
 
     def bootstrap(self, *, project_id: str, branch_id: str) -> dict[str, Any]:
         branch = self._branch(project_id, branch_id)
-        # 导入记录一般以 UTC 保存，但 DayPlan 必须按人物对话时区解释“早上/睡觉”。
-        # IdentityKernel 是现有训练流程产出的稳定读模型；没有时区证据时保留 UTC，
-        # 不擅自把所有历史都当成东八区。
+        # 已批准起点同时决定时间与时区，不从训练产物推断。
         runtime_anchor, runtime_timezone = _runtime_time_anchor(self.session, branch)
         snapshot = self.session.scalar(
             select(RuntimeSnapshotRow).where(RuntimeSnapshotRow.branch_id == branch_id)
         )
         if snapshot is None:
-            profile = self.session.scalar(
-                select(PersonWorldProfile)
-                .join(
-                    WorldGraphVersion, PersonWorldProfile.graph_version_id == WorldGraphVersion.id
+            if branch.origin_boundary:
+                raise RuntimeWorldUnavailableError(
+                    "历史起点必须先完成独立快照编译，不能使用最新背景"
                 )
+            publication = self.session.scalar(
+                select(WorldPublication)
                 .where(
-                    PersonWorldProfile.project_id == project_id, WorldGraphVersion.status == "ready"
+                    WorldPublication.project_id == project_id,
+                    WorldPublication.status == "active",
+                    WorldPublication.node_boundary_hash.is_(None),
                 )
-                .order_by(PersonWorldProfile.created_at.desc())
+                .order_by(WorldPublication.published_at.desc(), WorldPublication.id.desc())
             )
+            if publication is not None:
+                published_graph = self.session.get(WorldGraphVersion, publication.graph_version_id)
+                profile = (
+                    self.session.get(PersonWorldProfile, publication.profile_id)
+                    if published_graph is not None and published_graph.status == "ready"
+                    else None
+                )
+            else:
+                # 兼容升级前尚未建立 WorldPublication 的 ready 图。
+                profile = self.session.scalar(
+                    select(PersonWorldProfile)
+                    .where(PersonWorldProfile.node_boundary_hash.is_(None))
+                    .join(
+                        WorldGraphVersion,
+                        PersonWorldProfile.graph_version_id == WorldGraphVersion.id,
+                    )
+                    .where(
+                        PersonWorldProfile.project_id == project_id,
+                        WorldGraphVersion.status == "ready",
+                    )
+                    .order_by(PersonWorldProfile.created_at.desc())
+                )
             if profile is None:
                 raise RuntimeWorldUnavailableError("人物世界尚未就绪，不能初始化 Runtime 分支")
-            # LightRAG 暂无按时间检索：按当前约定，忽略分支的历史节点，直接把
-            # 最新导入对话末端和完整 ready 图谱作为 Snapshot 的唯一背景边界。
+            # 仅兼容没有新起点契约的旧末端分支。新历史分支必须已有独立快照，
+            # 上方门禁禁止它进入全量背景兜底；时间查询由冻结范围适配器承担。
             cutoff = _latest_profile_cutoff(self.session, profile, branch.origin_time)
             snapshot = RuntimeSnapshotRow(
                 branch_id=branch_id,
@@ -76,12 +180,12 @@ class RuntimeExecutor:
                 snapshot_mode="latest_profile",
                 source_message_ids=list(profile.source_message_ids),
                 profile=_profile_payload(profile),
-                routine_profile=profile.routine_summary,
-                compiler_version="runtime-v1-latest-graph",
+                routine_profile=_runtime_routine_profile(profile),
+                compiler_version=profile.compiler_version,
             )
             self.session.add(snapshot)
             self.session.flush()
-            _seed_world_memory(self.session, snapshot)
+        _seed_world_memory(self.session, snapshot)
         # 历史已审核记忆由数据库退役迁移一次性导入。Runtime v1 后续只读取
         # 自己的 MemoryRecord / MemoryIndexVersion，绝不再依赖旧连续记忆表。
         memory_service = MemoryService(self.session)
@@ -104,18 +208,39 @@ class RuntimeExecutor:
             self.session.add(clock_row)
         else:
             clock = self._clock(clock_row)
+        from .collaboration.plans import local_time
+
+        if (
+            branch.lifecycle_status in {"preparing", "prepare_failed"}
+            and clock_row.status != "paused"
+        ):
+            from .clock import pause_clock
+
+            clock = pause_clock(clock)
+            clock_row.virtual_anchor, clock_row.wall_anchor = (
+                clock.virtual_anchor,
+                clock.wall_anchor,
+            )
+            clock_row.status = "paused"
+        local_now = local_time(clock.now(), clock.timezone)
         plan = self.session.scalar(
             select(RuntimeDayPlanRow).where(
                 RuntimeDayPlanRow.branch_id == branch_id,
-                RuntimeDayPlanRow.plan_date == clock.now().date().isoformat(),
+                RuntimeDayPlanRow.plan_date == local_now.date().isoformat(),
             )
         )
         if plan is None:
-            generated = generate_day_plan(branch_id, clock.now().date(), snapshot.routine_profile)
             plan = RuntimeDayPlanRow(
                 branch_id=branch_id,
-                plan_date=(generated.plan_date or generated.date or clock.now().date()).isoformat(),
-                blocks=[item.model_dump(mode="json") for item in generated.blocks],
+                plan_date=local_now.date().isoformat(),
+                # 日程内容只能由 DayPlanAgent 提案。这里的空列表是一个“尚未
+                # 生成”的持久化槽位，不是睡眠、通勤、工作等固定日程的变体。
+                blocks=[],
+                generation_metadata={
+                    "status": "pending",
+                    "planner_version": "runtime-day-plan-v1",
+                    "reason": "awaiting_day_plan_agent",
+                },
             )
             self.session.add(plan)
             self.session.flush()
@@ -126,7 +251,7 @@ class RuntimeExecutor:
             )
         )
         if state is None:
-            current = _initial_state(branch_id, clock.now(), plan.blocks)
+            current = _initial_state(branch_id, local_now, plan.blocks)
             state = RuntimeLifeStateRow(
                 branch_id=branch_id,
                 version=1,
@@ -149,7 +274,9 @@ class RuntimeExecutor:
             )
             self.session.add(state)
             self.session.flush()
-            _schedule_next_boundary(self.session, branch_id, clock.now(), plan.blocks)
+            # 空的 pending 槽位不安排任何生活边界；Worker 会先运行 Planner，
+            # 通过验收后再由 commit_day_plan_proposal 安排首个 Wakeup。
+            _schedule_next_boundary(self.session, branch_id, local_now, plan.blocks)
         return {"snapshot": snapshot, "clock": clock, "plan": plan, "state": state}
 
     def append_user_event(
@@ -174,6 +301,7 @@ class RuntimeExecutor:
             priority=100,
         )
 
+    @observed_stage("runtime.executor.validate")
     def validate(
         self,
         *,
@@ -190,37 +318,29 @@ class RuntimeExecutor:
         )
         if current is None or current.version != expected_version:
             raise RuntimeError("life_state_version_conflict")
-        if decision.action == "speak" and (
-            not decision.communication_intent or not decision.content_points
-        ):
-            raise ValueError("speak 必须提供 communication_intent 和 content_points")
+        if decision.action == "speak" and decision.expression_task is None:
+            raise ValueError("speak 必须提供 expression_task")
         if decision.next_wakeup_at is not None and decision.next_wakeup_at <= virtual_now:
             raise ValueError("next_wakeup_at 必须晚于 virtual_now")
         if decision.action == "schedule" and decision.next_wakeup_at is None:
             raise ValueError("schedule 必须提供 next_wakeup_at")
         if decision.action != "speak" and decision.speech_mode is not None:
             raise ValueError("只有 speak 可以设置 speech_mode")
-        if decision.plan_patch is not None:
-            plan = self.session.scalar(
-                select(RuntimeDayPlanRow).where(
-                    RuntimeDayPlanRow.branch_id == branch_id,
-                    RuntimeDayPlanRow.plan_date == virtual_now.date().isoformat(),
-                )
+        if decision.plan_request is not None:
+            target_date = decision.plan_request.target_date or virtual_now.date()
+            if target_date != virtual_now.date():
+                raise ValueError("当前 Runtime 仅允许修订虚拟当天的 DayPlan")
+            self._validate_state_patch_sources(
+                branch_id=branch_id,
+                source_ids=decision.plan_request.source_event_ids,
             )
-            target_id = decision.plan_patch.block_id
-            if plan is None or not target_id:
-                raise ValueError("plan_patch 必须指向当天已有的生活块")
-            target = next(
-                (item for item in (plan.blocks or []) if item.get("id") == target_id), None
-            )
-            if target is None:
-                raise ValueError("plan_patch 指向的生活块不存在")
         patch = decision.state_patch.model_dump(exclude_none=True)
         if patch.get("activity") and patch.get("activity") != current.activity:
-            # 跨越默认生活块的活动变化必须有局部计划覆盖，或引用已经落库的分支事件。
-            if decision.plan_patch is None and not decision.state_patch.source_event_ids:
-                raise ValueError("改变 activity 必须提供 plan_patch 或 source_event_ids")
+            # 跨越默认生活块的活动变化必须由规划请求或已落库分支事件支撑。
+            if decision.plan_request is None and not decision.state_patch.source_event_ids:
+                raise ValueError("改变 activity 必须提供 plan_request 或 source_event_ids")
 
+    @observed_stage("runtime.executor.commit")
     def commit(
         self,
         *,
@@ -231,24 +351,69 @@ class RuntimeExecutor:
         virtual_now: datetime,
         trigger_event_ids: list[str],
         actor_message: ActorMessage | None = None,
+        expression_result=None,
+        asset_sources=None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
+        key = idempotency_key or f"cycle:{branch_id}:{','.join(sorted(trigger_event_ids))}"
+        existing = self.session.scalar(
+            select(RuntimeLifeEventRow).where(
+                RuntimeLifeEventRow.branch_id == branch_id,
+                RuntimeLifeEventRow.idempotency_key == key,
+            )
+        )
+        if existing is not None:
+            return {
+                "event": existing,
+                "message": self.session.scalar(
+                    select(BranchMessage).where(
+                        BranchMessage.branch_id == branch_id, BranchMessage.turn_id == existing.id
+                    )
+                ),
+                "state": self._current_state(branch_id),
+            }
+        if decision.plan_request is not None or decision.peer_reply is not None:
+            raise ValueError("协作请求必须先由图路由处理，不能作为最终行为直接提交")
+        reference_error = self.validate_decision_references(branch_id, decision, virtual_now)
+        if reference_error:
+            raise ValueError(reference_error)
         self.validate(
             branch_id=branch_id,
             decision=decision,
             expected_version=expected_version,
             virtual_now=virtual_now,
         )
+        from .expression_contracts import ExpressionResult
+
+        if expression_result is not None:
+            if expression_result.status != "ready":
+                raise ValueError("未完成的表达不能提交")
+            actor_message = expression_result
+        elif actor_message is not None:
+            # 只为历史内部调用保留文本适配；新模型只输出 messages。
+            actor_message = ExpressionResult(
+                status="ready",
+                messages=[
+                    {"kind": "text", "text": text}
+                    for text in actor_message.bubbles or [actor_message.text]
+                ],
+            )
+        if actor_message is not None:
+            from .style_history import validate_asset
+
+            branch = self._branch(project_id, branch_id)
+            snapshot = self.session.scalar(
+                select(RuntimeSnapshotRow).where(RuntimeSnapshotRow.branch_id == branch_id)
+            )
+            for part in actor_message.messages:
+                if part.kind == "sticker":
+                    if part.asset_ref not in (asset_sources or {}):
+                        raise ValueError("sticker_not_supplied_to_actor")
+                    validate_asset(self.session, branch, snapshot, part.asset_ref)
         if decision.action == "speak" and actor_message is None:
-            raise ValueError("speak 决定必须经过 PersonaActor 生成待提交消息")
+            raise ValueError("speak 决定必须包含可提交回复")
         if actor_message is not None and decision.action != "speak":
-            raise ValueError("非 speak 决定不能提交 PersonaActor 消息")
-        key = idempotency_key or f"cycle:{branch_id}:{','.join(sorted(trigger_event_ids))}"
-        existing = self.session.scalar(
-            select(RuntimeLifeEventRow).where(RuntimeLifeEventRow.idempotency_key == key)
-        )
-        if existing is not None:
-            return {"event": existing, "message": None, "state": self._current_state(branch_id)}
+            raise ValueError("非 speak 决定不能提交回复")
         current = self.session.scalar(
             select(RuntimeLifeStateRow).where(
                 RuntimeLifeStateRow.branch_id == branch_id, RuntimeLifeStateRow.is_current.is_(True)
@@ -261,12 +426,35 @@ class RuntimeExecutor:
         patch.pop("reason", None)
         patch.pop("source_event_ids", None)
         patch.pop("valid_until", None)
+        from .subjective_state import apply_update, commit_memories, resolve_inputs, visible_sources
+
+        allowed = visible_sources(self.session, branch_id, virtual_now)
+        decision_ref = str(uuid4())
+        if decision.subjective_state_updates is not None:
+            if any(
+                key in patch
+                for key in ("mood", "attention", "current_goal", "open_conversation_threads")
+            ):
+                raise ValueError("subjective_state_dual_write")
+            patch["subjective_state"] = apply_update(
+                old.get("subjective_state"),
+                decision.subjective_state_updates,
+                allowed,
+                virtual_now,
+                decision_ref=decision_ref,
+                has_expression=actor_message is not None,
+            )
+        commit_memories(
+            self.session,
+            branch_id,
+            decision.memory_proposals,
+            allowed,
+            virtual_now,
+            actor_message is not None,
+        )
+        resolve_inputs(self.session, branch_id, decision.input_resolutions, virtual_now)
         state: RuntimeLifeStateRow = current
-        if (
-            patch
-            or decision.plan_patch is not None
-            or decision.action in {"continue_life", "schedule"}
-        ):
+        if patch or decision.action in {"continue_life", "schedule"}:
             self._validate_state_patch_sources(
                 branch_id=branch_id,
                 source_ids=decision.state_patch.source_event_ids,
@@ -320,26 +508,11 @@ class RuntimeExecutor:
                 is_current=True,
             )
             self.session.add(state)
-        if decision.plan_patch is not None:
-            plan = self.session.scalar(
-                select(RuntimeDayPlanRow).where(
-                    RuntimeDayPlanRow.branch_id == branch_id,
-                    RuntimeDayPlanRow.plan_date == virtual_now.date().isoformat(),
-                )
-            )
-            if plan is not None:
-                blocks = [dict(item) for item in (plan.blocks or [])]
-                target_id = decision.plan_patch.block_id
-                target = next((item for item in blocks if item.get("id") == target_id), None)
-                if target is not None:
-                    target.update(
-                        decision.plan_patch.model_dump(exclude_none=True, exclude={"block_id"})
-                    )
-                    plan.blocks = blocks
         life_event = RuntimeLifeEventRow(
+            id=decision_ref,
             branch_id=branch_id,
             event_type="decision",
-            occurred_at=virtual_now,
+            occurred_at=virtual_now.astimezone(UTC),
             payload=decision.model_dump(mode="json"),
             idempotency_key=key,
         )
@@ -349,18 +522,30 @@ class RuntimeExecutor:
             sequence = self.session.scalar(
                 select(func.max(BranchMessage.sequence)).where(BranchMessage.branch_id == branch_id)
             )
-            message = BranchMessage(
-                branch_id=branch_id,
-                sequence=(int(sequence) + 1 if sequence is not None else 0),
-                role="assistant",
-                content=actor_message.text,
-                type="text",
-                generation_status="completed",
-                generation_metadata={"runtime_v1": True, "bubbles": actor_message.bubbles},
-                observed_at=virtual_now,
-                is_proactive=decision.speech_mode == "proactive",
-            )
-            self.session.add(message)
+            for index, part in enumerate(actor_message.messages):
+                item = BranchMessage(
+                    branch_id=branch_id,
+                    sequence=(int(sequence) + 1 if sequence is not None else 0) + index,
+                    role="assistant",
+                    turn_id=life_event.id,
+                    bubble_index=index,
+                    content=part.text if part.kind == "text" else "[表情]",
+                    type=part.kind,
+                    media_asset_id=part.asset_ref if part.kind == "sticker" else None,
+                    generation_status="completed",
+                    generation_metadata={
+                        "runtime_v1": True,
+                        "expression_version": 3,
+                        "sticker_usage_refs": (asset_sources or {}).get(part.asset_ref, [])
+                        if part.kind == "sticker"
+                        else [],
+                    },
+                    observed_at=virtual_now.astimezone(UTC),
+                    is_proactive=decision.speech_mode == "proactive",
+                )
+                self.session.add(item)
+                if message is None:
+                    message = item
         if decision.next_wakeup_at is not None:
             self.schedule_wakeup(
                 branch_id=branch_id,
@@ -375,6 +560,9 @@ class RuntimeExecutor:
         # 安排一次，否则第一条边界处理完分支就会永久停止自动推进。
         self.ensure_next_plan_boundary(branch_id=branch_id, virtual_now=virtual_now)
         self.session.flush()
+        from .conversation_maintenance import enqueue_maintenance
+
+        enqueue_maintenance(self.session, branch_id, life_event.id)
         return {"event": life_event, "message": message, "state": state}
 
     def schedule_wakeup(
@@ -385,7 +573,10 @@ class RuntimeExecutor:
         reason: str,
         trigger_type: str,
         idempotency_key: str,
+        revive_cancelled: bool = False,
     ) -> RuntimeWakeupRow:
+        # SQLite 不保存偏移；持久化时间点统一 UTC，本地时区仅用于人物日历。
+        wake_at = (wake_at if wake_at.tzinfo else wake_at.replace(tzinfo=UTC)).astimezone(UTC)
         existing = self.session.scalar(
             select(RuntimeWakeupRow).where(
                 RuntimeWakeupRow.branch_id == branch_id,
@@ -393,6 +584,14 @@ class RuntimeExecutor:
             )
         )
         if existing is not None:
+            # DayPlan 修订会先取消旧边界，再按新块重建；若恰好仍是同一时刻，
+            # 幂等键相同的旧行应被恢复，而不是让分支失去下一条边界唤醒。
+            if revive_cancelled and existing.status == "cancelled":
+                existing.status = "scheduled"
+                existing.wake_at = wake_at
+                existing.reason = reason
+                existing.trigger_type = trigger_type
+                existing.executing_at = None
             return existing
         row = RuntimeWakeupRow(
             branch_id=branch_id,
@@ -431,16 +630,19 @@ class RuntimeExecutor:
     ) -> None:
         """通过版本 CAS 退休当前 LifeState，防止并发 Cycle 静默互相覆盖。"""
 
-        result = self.session.execute(
-            update(RuntimeLifeStateRow)
-            .where(
-                RuntimeLifeStateRow.id == current.id,
-                RuntimeLifeStateRow.branch_id == current.branch_id,
-                RuntimeLifeStateRow.version == expected_version,
-                RuntimeLifeStateRow.is_current.is_(True),
-            )
-            .values(is_current=False)
-            .execution_options(synchronize_session=False)
+        result = cast(
+            CursorResult[Any],
+            self.session.execute(
+                update(RuntimeLifeStateRow)
+                .where(
+                    RuntimeLifeStateRow.id == current.id,
+                    RuntimeLifeStateRow.branch_id == current.branch_id,
+                    RuntimeLifeStateRow.version == expected_version,
+                    RuntimeLifeStateRow.is_current.is_(True),
+                )
+                .values(is_current=False)
+                .execution_options(synchronize_session=False)
+            ),
         )
         if result.rowcount != 1:
             raise RuntimeError("life_state_version_conflict")
@@ -458,6 +660,225 @@ class RuntimeExecutor:
         )
         if plan is not None:
             _schedule_next_boundary(self.session, branch_id, virtual_now, plan.blocks or [])
+
+    def day_plan_needs_generation(self, plan: RuntimeDayPlanRow) -> bool:
+        """判断空闲维护是否到期；聊天本身不承担正常计划准备职责。"""
+
+        from .plan_status import can_schedule
+
+        return can_schedule(plan, datetime.now(UTC))
+
+    def mark_day_plan_unavailable(
+        self,
+        *,
+        plan: RuntimeDayPlanRow,
+        reason: str,
+        virtual_now: datetime,
+    ) -> RuntimeDayPlanRow:
+        """记录 Planner 本轮不可用，不伪造固定生活计划。"""
+
+        plan.generation_metadata = {
+            **(plan.generation_metadata if isinstance(plan.generation_metadata, dict) else {}),
+            "status": "unavailable",
+            "planner_version": "runtime-day-plan-v1",
+            "reason": reason[:160],
+            "updated_at": virtual_now.isoformat(),
+        }
+        return plan
+
+    @observed_stage("runtime.executor.commit_day_plan")
+    def commit_day_plan_proposal(
+        self,
+        *,
+        branch_id: str,
+        proposal: DayPlanProposal,
+        virtual_now: datetime,
+        mode: str,
+        date_features: dict[str, Any] | None = None,
+        expected_version: int | None = None,
+        idempotency_key: str | None = None,
+    ) -> RuntimeDayPlanRow:
+        """验证并原子替换当天计划；DayPlanAgent 本身永远没有写库能力。"""
+
+        from .collaboration.plans import local_time
+
+        clock_row = self.session.get(RuntimeClockRow, branch_id)
+        if clock_row is not None:
+            virtual_now = local_time(virtual_now, clock_row.timezone)
+        if proposal.plan_date < virtual_now.date() or (
+            mode != "life_event"
+            and proposal.plan_date
+            not in {virtual_now.date(), virtual_now.date() + timedelta(days=1)}
+        ):
+            raise ValueError("DayPlanProposal 只能写入虚拟当地的今天或明天")
+        plan = self.session.scalar(
+            select(RuntimeDayPlanRow).where(
+                RuntimeDayPlanRow.branch_id == branch_id,
+                RuntimeDayPlanRow.plan_date == proposal.plan_date.isoformat(),
+            )
+        )
+        if plan is None:
+            if expected_version not in {None, 0}:
+                raise ValueError("计划版本冲突")
+            plan = RuntimeDayPlanRow(
+                branch_id=branch_id,
+                plan_date=proposal.plan_date.isoformat(),
+                blocks=[],
+                version=0,
+                generation_metadata={"status": "pending"},
+            )
+            self.session.add(plan)
+            self.session.flush()
+        metadata = plan.generation_metadata or {}
+        if idempotency_key and idempotency_key in metadata.get("commit_keys", []):
+            return plan
+        if expected_version is not None and plan.version != expected_version:
+            raise ValueError("计划版本冲突，必须读取新版本重新判断")
+        self._validate_day_plan_proposal(
+            branch_id=branch_id,
+            plan=plan,
+            proposal=proposal,
+            virtual_now=virtual_now,
+            mode=mode,
+        )
+        existing_blocks = [dict(item) for item in (plan.blocks or []) if isinstance(item, dict)]
+        from .life_events.commit import archive_plan
+
+        archive_plan(self.session, plan)
+        # 对语义未变的块复用 ID，特别是 revision 中正在执行的块。否则当前
+        # LifeState 会指向一个刚被模型重写掉的 block，并在下轮产生伪边界切换。
+        plan.blocks = [
+            {
+                "id": _reused_block_id(existing_blocks, block.model_dump(mode="json"))
+                or str(uuid4()),
+                **block.model_dump(mode="json"),
+            }
+            for block in proposal.blocks
+        ]
+        plan.version += 1
+        plan.generation_metadata = {
+            **metadata,
+            "preparation": {
+                **metadata.get("preparation", {}),
+                "status": "ready",
+                "retry_at": None,
+                "error_code": None,
+            },
+            "commit_receipts": {
+                **metadata.get("commit_receipts", {}),
+                **(
+                    {
+                        idempotency_key: {
+                            "plan_date": plan.plan_date,
+                            "plan_version": plan.version,
+                            "status": "committed",
+                            "key": idempotency_key,
+                        }
+                    }
+                    if idempotency_key
+                    else {}
+                ),
+            },
+            "commit_keys": [
+                *metadata.get("commit_keys", []),
+                *([idempotency_key] if idempotency_key else []),
+            ],
+            "status": "agent",
+            "planner_version": "runtime-day-plan-v1",
+            "mode": mode,
+            "source_ids": list(
+                dict.fromkeys(
+                    source_id for block in proposal.blocks for source_id in block.evidence_ids
+                )
+            ),
+            "assumptions": proposal.assumptions,
+            "reason": proposal.private_reason,
+            "date_features": dict(date_features or {}),
+            "updated_at": virtual_now.isoformat(),
+        }
+        if proposal.plan_date != virtual_now.date():
+            # 明天的计划只更新明天，绝不能取消今天的 Wakeup 或推进当前活动。
+            archive_plan(self.session, plan)
+            # 次日首块也需要被唤醒，不能默认早七点才开始生活。
+            _schedule_next_boundary(self.session, branch_id, virtual_now, [])
+            self.session.flush()
+            return plan
+        # 旧边界可能已指向被修订掉的时间；先取消再为新计划补一条唯一边界。
+        self.session.query(RuntimeWakeupRow).filter(
+            RuntimeWakeupRow.branch_id == branch_id,
+            RuntimeWakeupRow.status == "scheduled",
+            RuntimeWakeupRow.trigger_type == "plan_transition",
+            RuntimeWakeupRow.wake_at > virtual_now,
+        ).update({"status": "cancelled"}, synchronize_session=False)
+        _schedule_next_boundary(self.session, branch_id, virtual_now, plan.blocks)
+        archive_plan(self.session, plan)
+        self.session.flush()
+        return plan
+
+    def _validate_day_plan_proposal(
+        self,
+        *,
+        branch_id: str,
+        plan: RuntimeDayPlanRow,
+        proposal: DayPlanProposal,
+        virtual_now: datetime,
+        mode: str,
+    ) -> None:
+        blocks = proposal.blocks
+        from .tools.plan_validation import validate_plan_structure
+
+        validate_plan_structure(proposal)
+        requested_sources = {
+            source_id for block in blocks for source_id in block.evidence_ids if source_id
+        }
+        self._validate_plan_evidence_sources(branch_id, requested_sources)
+        if mode == "revision" and proposal.plan_date == virtual_now.date():
+            current_time = virtual_now.strftime("%H:%M")
+            existing_locked = [
+                item for item in (plan.blocks or []) if str(item.get("start", "")) <= current_time
+            ]
+            proposed_locked = [block for block in blocks if block.start <= current_time]
+            if len(existing_locked) != len(proposed_locked) or any(
+                not _same_plan_block(old, new.model_dump(mode="json"))
+                for old, new in zip(existing_locked, proposed_locked, strict=True)
+            ):
+                raise ValueError("计划修订不能改写已经开始的生活块")
+
+    def _validate_plan_evidence_sources(self, branch_id: str, requested_sources: set[str]) -> None:
+        if not requested_sources:
+            return
+        snapshot = self.session.scalar(
+            select(RuntimeSnapshotRow).where(RuntimeSnapshotRow.branch_id == branch_id)
+        )
+        from .snapshot_sources import frozen_source_ids
+
+        allowed = frozen_source_ids(self.session, snapshot) if snapshot is not None else set()
+        allowed.update(
+            self.session.scalars(
+                select(BranchMessage.id).where(
+                    BranchMessage.branch_id == branch_id,
+                    BranchMessage.id.in_(requested_sources),
+                )
+            )
+        )
+        allowed.update(
+            self.session.scalars(
+                select(RuntimeEventRow.id).where(
+                    RuntimeEventRow.branch_id == branch_id,
+                    RuntimeEventRow.id.in_(requested_sources),
+                )
+            )
+        )
+        allowed.update(
+            self.session.scalars(
+                select(RuntimeLifeEventRow.id).where(
+                    RuntimeLifeEventRow.branch_id == branch_id,
+                    RuntimeLifeEventRow.id.in_(requested_sources),
+                )
+            )
+        )
+        if requested_sources - allowed:
+            raise ValueError("DayPlanProposal 含有不属于当前分支或冻结 Snapshot 的证据")
 
     def _branch(self, project_id: str, branch_id: str) -> Branch:
         branch = self.session.scalar(
@@ -520,7 +941,60 @@ class RuntimeExecutor:
         if not source_ids.issubset(allowed):
             raise ValueError("world 记忆含有不属于快照的来源")
 
-    def _validate_state_patch_sources(self, *, branch_id: str, source_ids: list[str]) -> None:
+    @observed_stage("runtime.executor.validate_references")
+    def validate_decision_references(self, branch_id, decision, now):
+        """检查引用权限，不要求回复对象与完成的消息一一对应。"""
+        from .snapshot_sources import frozen_source_ids
+        from .subjective_state import visible_sources
+
+        try:
+            self._validate_state_patch_sources(
+                branch_id=branch_id, source_ids=decision.state_patch.source_event_ids, now=now
+            )
+            seen = set()
+            for item in decision.input_resolutions:
+                if item.message_ref in seen:
+                    raise ValueError("input_resolutions 含有重复 message_ref")
+                seen.add(item.message_ref)
+                row = self.session.get(BranchMessage, item.message_ref)
+                if row is None or row.branch_id != branch_id or row.role != "user":
+                    raise ValueError(f"input_resolutions 无效用户消息引用：{item.message_ref}")
+                occurred = row.observed_at or row.created_at
+                if occurred.tzinfo is None:
+                    occurred = occurred.replace(tzinfo=UTC)
+                if occurred > now:
+                    raise ValueError("input_resolutions 不能处理未来消息")
+                old = (row.generation_metadata or {}).get("input_status")
+                if old in {"completed", "no_response_needed"} and old != item.status:
+                    raise ValueError(f"消息已经处理完成：{item.message_ref}")
+            if decision.expression_task:
+                snapshot = self.session.scalar(
+                    select(RuntimeSnapshotRow).where(RuntimeSnapshotRow.branch_id == branch_id)
+                )
+                messages = set(
+                    self.session.scalars(
+                        select(BranchMessage.id).where(
+                            BranchMessage.branch_id == branch_id,
+                            BranchMessage.generation_status != "failed",
+                        )
+                    )
+                )
+                if snapshot:
+                    messages.update(frozen_source_ids(self.session, snapshot))
+                allowed = messages & visible_sources(self.session, branch_id, now)
+                invalid = set(decision.expression_task.respond_to_refs) - allowed
+                if invalid:
+                    raise ValueError(
+                        "expression_task.respond_to_refs 无效消息引用："
+                        + ", ".join(sorted(invalid))
+                    )
+        except ValueError as error:
+            return str(error)
+        return None
+
+    def _validate_state_patch_sources(
+        self, *, branch_id: str, source_ids: list[str], now=None
+    ) -> None:
         """StatePatch 可以引用本轮或已落库分支事件，但绝不能越过分支边界。"""
 
         requested = set(source_ids)
@@ -550,6 +1024,19 @@ class RuntimeExecutor:
                 )
             )
         )
+        known.update(
+            self.session.scalars(
+                select(RuntimeWakeupRow.id).where(
+                    RuntimeWakeupRow.branch_id == branch_id,
+                    RuntimeWakeupRow.id.in_(requested),
+                    RuntimeWakeupRow.status != "cancelled",
+                )
+            )
+        )
+        if now is not None:
+            from .subjective_state import visible_sources
+
+            known.intersection_update(visible_sources(self.session, branch_id, now))
         if requested - known:
             raise ValueError("state_patch 含有不属于当前分支的来源")
 
@@ -580,39 +1067,34 @@ def _latest_import_node(session: Session, project_id: str) -> str | None:
 
 
 def _runtime_time_anchor(session: Session, branch: Branch) -> tuple[datetime, str]:
-    """从已冻结的人格行为节律取得分支本地时钟，缺失时安全退回 UTC。"""
-
+    """新分支读取批准边界；旧分支保留已存时钟，不重新猜时区。"""
+    boundary = branch.origin_boundary
+    if boundary:
+        origin = datetime.fromisoformat(boundary["cutoff_at"])
+        if origin.tzinfo is None:
+            raise ValueError("起点边界必须包含明确时区")
+        zone = boundary["timezone"]
+        return origin.astimezone(ZoneInfo(zone)), zone
+    clock = session.get(RuntimeClockRow, branch.id)
+    if clock is not None:
+        return clock.virtual_anchor, clock.timezone
+    # 升级前尚未初始化的分支缺乏可信时区，不再查询 IdentityKernel。
     origin = branch.origin_time
     if origin.tzinfo is None:
         origin = origin.replace(tzinfo=UTC)
-    kernel = session.scalar(
-        select(IdentityKernel).where(IdentityKernel.model_version_id == branch.model_version_id)
-    )
-    rhythm = (
-        kernel.content.get("behavioral_rhythm", {})
-        if kernel is not None and isinstance(kernel.content, dict)
-        else {}
-    )
-    raw_offset = rhythm.get("timezone_offset_minutes") if isinstance(rhythm, dict) else None
-    if (
-        not isinstance(raw_offset, int)
-        or isinstance(raw_offset, bool)
-        or not -720 <= raw_offset <= 840
-    ):
-        return origin.astimezone(UTC), "UTC"
-    local_timezone = timezone(timedelta(minutes=raw_offset))
-    sign = "+" if raw_offset >= 0 else "-"
-    hours, minutes = divmod(abs(raw_offset), 60)
-    return (
-        origin.astimezone(local_timezone),
-        f"UTC{sign}{hours:02d}:{minutes:02d}",
-    )
+    return origin.astimezone(UTC), "UTC"
 
 
 def _profile_payload(profile: PersonWorldProfile | None) -> dict[str, Any]:
     if profile is None:
         return {}
+    if profile.profile_schema_version == "v3":
+        # 来自分支绑定的已发布 Profile，绝不查询候选草稿或当前全局最新版本。
+        return {**profile.profile_v3, "profile_schema_version": "v3"}
+    if profile.profile_schema_version == "v2" and isinstance(profile.profile_v2, dict):
+        return _runtime_projection_v2(profile.profile_v2)
     return {
+        "profile_schema_version": "v1",
         "identity": profile.identity,
         "work_and_education": profile.work_and_education,
         "places": profile.places,
@@ -626,8 +1108,95 @@ def _profile_payload(profile: PersonWorldProfile | None) -> dict[str, Any]:
     }
 
 
+def _runtime_projection_v2(profile: dict[str, Any]) -> dict[str, Any]:
+    """从七栏目规范 Profile 构造 Runtime 所需的最小只读投影。
+
+    这里仅调整数据形状，不归纳或改写任何事实。旧 key 是 Runtime 现有工具的稳定输入名，
+    值则完全取自 v2；这样迁移期不会重新依赖旧 Profile 的兼容投影。
+    """
+
+    def values(domain: str, *fields: str) -> list[object]:
+        section = profile.get(domain, {})
+        if not isinstance(section, dict):
+            return []
+        return [
+            item for field in fields for item in section.get(field, []) if isinstance(item, dict)
+        ]
+
+    return {
+        "profile_schema_version": "v2",
+        "identity": profile.get("identity", {}),
+        "work_and_education": values("life_context", "work_and_learning"),
+        "places": values("life_context", "places_and_environment"),
+        "social_relationships": values("social_world", "ties"),
+        "preferences": values(
+            "agency",
+            "preferences",
+            "values_and_interpretations",
+            "goals_and_commitments",
+        ),
+        "recurring_activities": values("practices", "recurring_activities"),
+        "routine_summary": {
+            "workdays": [],
+            "weekends": [],
+            "other_patterns": values("practices", "temporal_rhythms"),
+        },
+        "relationship_with_user": profile.get("relationship_with_user", {}),
+        "important_events": values("life_course", "episodes"),
+        "life_phases": values("life_course", "transitions", "trajectories"),
+    }
+
+
+def _runtime_routine_profile(profile: PersonWorldProfile) -> dict[str, Any]:
+    """为既有 DayPlan 工具提供 v2 practices 的兼容运行时视图。"""
+
+    projection = _profile_payload(profile)
+    if profile.profile_schema_version == "v3":
+        return {
+            "practices": projection.get("practices", {}),
+            "context_modules": [
+                item
+                for item in projection.get("life_context", {}).get("context_modules", [])
+                if item.get("status") in {"current", "planned", "paused"}
+            ],
+            "interpretation": (
+                "模块是处境和制度背景，practices 是实际规律理解；均不是当天已发生安排。"
+            ),
+        }
+    routine = projection.get("routine_summary", {})
+    return dict(routine) if isinstance(routine, dict) else {}
+
+
 def _seed_world_memory(session: Session, snapshot: RuntimeSnapshotRow) -> None:
     """把人物档案编译为统一 world 记忆，供 search_memory 只读检索。"""
+    from .snapshot_sources import profile_entries
+
+    if snapshot.profile.get("profile_schema_version") == "v3":
+        for entry in profile_entries(snapshot):
+            record_id = str(uuid5(NAMESPACE_URL, entry["source_id"]))
+            if session.get(RuntimeMemoryRow, record_id) is not None:
+                continue
+            session.add(
+                RuntimeMemoryRow(
+                    id=record_id,
+                    scope="world",
+                    snapshot_id=snapshot.id,
+                    subject="目标人物",
+                    predicate=entry["field_path"],
+                    object=entry["text"],
+                    summary=entry["text"],
+                    status="asserted",
+                    source_ids=[entry["source_id"]],
+                    confidence=0.7,
+                )
+            )
+        session.flush()
+        return
+    # 只有 v2 规范事实投影经过了栏目 Contract 和本地来源边界校验，才可以成为
+    # Runtime 的 confirmed 世界记忆；遗留 Profile 仍可展示，但绝不自动升级。
+    if snapshot.profile.get("profile_schema_version") != "v2":
+        return
+    allowed_source_ids = set(snapshot.source_message_ids or [])
     for field in (
         "identity",
         "work_and_education",
@@ -641,6 +1210,9 @@ def _seed_world_memory(session: Session, snapshot: RuntimeSnapshotRow) -> None:
         "life_phases",
     ):
         for summary, source_ids in _profile_statements(snapshot.profile.get(field)):
+            verified_source_ids = [item for item in source_ids if item in allowed_source_ids]
+            if not verified_source_ids:
+                continue
             session.add(
                 RuntimeMemoryRow(
                     id=str(uuid4()),
@@ -651,7 +1223,7 @@ def _seed_world_memory(session: Session, snapshot: RuntimeSnapshotRow) -> None:
                     object=str(summary)[:500],
                     summary=str(summary)[:2000],
                     status="confirmed",
-                    source_ids=source_ids,
+                    source_ids=verified_source_ids,
                     confidence=1.0,
                 )
             )
@@ -661,9 +1233,9 @@ def _profile_statements(value: object) -> list[tuple[str, list[str]]]:
     """从编译档案提取最小可检索陈述，保留每条原始 message ID。"""
 
     if isinstance(value, dict):
-        text = value.get("text") or value.get("summary")
+        text = value.get("statement") or value.get("text") or value.get("summary")
         if isinstance(text, str) and text.strip():
-            sources = value.get("source_message_ids", [])
+            sources = value.get("evidence_message_ids", value.get("source_message_ids", []))
             return [
                 (
                     text.strip(),
@@ -711,11 +1283,28 @@ def _initial_state(branch_id: str, now: datetime, blocks: list[dict[str, Any]]) 
 def _schedule_next_boundary(
     session: Session, branch_id: str, now: datetime, blocks: list[dict[str, Any]]
 ) -> None:
+    # 没有经过 DayPlanAgent 验收的块时，不能偷偷安排一个固定的次日 07:00 唤醒。
+    # 等 Agent 正式提交计划后，此函数会由 Executor 再次调用。
     next_block = next(
         (block for block in blocks if block.get("start", "") > now.strftime("%H:%M")), None
     )
     if next_block is None:
-        wake_at = (now + timedelta(days=1)).replace(hour=7, minute=0, second=0, microsecond=0)
+        tomorrow = (now + timedelta(days=1)).date().isoformat()
+        next_plan = session.scalar(
+            select(RuntimeDayPlanRow).where(
+                RuntimeDayPlanRow.branch_id == branch_id, RuntimeDayPlanRow.plan_date == tomorrow
+            )
+        )
+        if (
+            not next_plan
+            or not next_plan.blocks
+            or (next_plan.generation_metadata or {}).get("status") != "agent"
+        ):
+            return  # 未就绪由独立准备扫描恢复，不臆造默认起床时刻。
+        first = next_plan.blocks[0]["start"]
+        wake_at = (now + timedelta(days=1)).replace(
+            hour=int(first[:2]), minute=int(first[3:]), second=0, microsecond=0
+        )
     else:
         wake_at = now.replace(
             hour=int(next_block["start"][:2]),
@@ -729,6 +1318,7 @@ def _schedule_next_boundary(
         reason="DayPlan 生活块边界",
         trigger_type="plan_transition",
         idempotency_key=f"plan:{branch_id}:{wake_at.isoformat()}",
+        revive_cancelled=True,
     )
 
 
@@ -761,3 +1351,25 @@ def _block_end(now: datetime, block: dict[str, Any] | None) -> datetime | None:
     if hour == 24 and minute == 0:
         return (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+
+def _minutes(value: str) -> int:
+    """将已经过 schema 校验的 HH:MM 转为日内分钟，24:00 合法。"""
+
+    hour, minute = (int(part) for part in value.split(":", 1))
+    return hour * 60 + minute
+
+
+def _same_plan_block(old: dict[str, Any], new: dict[str, Any]) -> bool:
+    """修订时只比较运行时语义字段；数据库 ID 和审计证据允许自然更新。"""
+
+    fields = ("start", "end", "activity", "location_role", "default_availability")
+    return all(old.get(field) == new.get(field) for field in fields)
+
+
+def _reused_block_id(existing: list[dict[str, Any]], proposed: dict[str, Any]) -> str | None:
+    for block in existing:
+        block_id = block.get("id")
+        if isinstance(block_id, str) and _same_plan_block(block, proposed):
+            return block_id
+    return None

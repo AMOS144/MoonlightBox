@@ -20,6 +20,22 @@ from sqlalchemy.orm import Mapped, mapped_column
 from moonlightbox.db import Base
 
 
+class RuntimeInitializationRow(Base):
+    """分支准备的领域状态；调查记录只在此任务和统一检查点内，不进入聊天上下文。"""
+
+    __tablename__ = "runtime_initializations"
+    branch_id: Mapped[str] = mapped_column(
+        ForeignKey("branches.id", ondelete="CASCADE"), primary_key=True
+    )
+    input_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(24), default="pending")
+    work: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+
+
 class RuntimeEventRow(Base):
     __tablename__ = "runtime_events"
     __table_args__ = (
@@ -31,6 +47,9 @@ class RuntimeEventRow(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
     branch_id: Mapped[str] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"))
     event_type: Mapped[str] = mapped_column(String(32))
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
     status: Mapped[str] = mapped_column(String(20), default="queued")
     priority: Mapped[int] = mapped_column(Integer, default=0)
     occurred_at: Mapped[datetime] = mapped_column(
@@ -86,6 +105,9 @@ class RuntimeDayPlanRow(Base):
     plan_date: Mapped[str] = mapped_column(String(10))
     blocks: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     version: Mapped[int] = mapped_column(Integer, default=1)
+    # 固定模板只承担 Planner 失败时的安全兜底。该字段让 Worker 能识别尚未由
+    # DayPlanAgent 审核的旧计划，而不会在每次对话里重复调用规划模型。
+    generation_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
@@ -247,6 +269,43 @@ class RuntimeLifeEventRow(Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     idempotency_key: Mapped[str] = mapped_column(String(160), unique=True)
+
+
+class RuntimeCycleTraceRow(Base):
+    """一轮 Runtime Cycle 的本地诊断账本，不参与任何人物事实或记忆推理。"""
+
+    __tablename__ = "runtime_cycle_traces"
+    __table_args__ = (
+        Index("ix_runtime_cycle_traces_branch_started", "branch_id", "started_at"),
+        Index("ix_runtime_cycle_traces_job", "job_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    branch_id: Mapped[str] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"))
+    job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    cycle_key: Mapped[str] = mapped_column(String(180))
+    status: Mapped[str] = mapped_column(String(24), default="running")
+    stage: Mapped[str] = mapped_column(String(48), default="claimed")
+    trigger_event_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    wakeup_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    virtual_now: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    packet: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # DayPlanAgent 与 Director/Actor 使用同一条 Cycle Trace；规划不是隐式的
+    # Executor 副作用，必须能单独查看模型步骤和最终提案。
+    planner_steps: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    planner_proposal: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    director_steps: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    actor_steps: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    director_decision: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    committed_decision: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    outcome: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 # 语义别名：保留 Row 后缀作为数据库层实现名，供按设计文档命名的调用方使用。

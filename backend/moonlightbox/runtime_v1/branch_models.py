@@ -24,12 +24,18 @@ class Branch(Base):
     project_id: Mapped[str] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), index=True
     )
-    # 起点只用于审计和初始化时钟；v1 的世界资料始终来自最新完成的图谱。
-    origin_event_id: Mapped[str] = mapped_column(ForeignKey("event_nodes.id"))
-    model_version_id: Mapped[str] = mapped_column(ForeignKey("model_versions.id"))
+    # 旧分支引用仅保留可读；新入口不要求事件节点或训练产物。
+    origin_event_id: Mapped[str | None] = mapped_column(ForeignKey("event_nodes.id"), nullable=True)
+    model_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("model_versions.id"), nullable=True
+    )
+    origin_boundary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     title: Mapped[str] = mapped_column(String(255))
     origin_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     lifecycle_status: Mapped[str] = mapped_column(String(16), default="active")
+    # 保留数据库列名，但仅表示分支执行代际：时钟控制、显式背景切换等使旧任务失效。
+    # 普通聊天消息不递增；消息顺序/待处理状态由消息和事件队列维护。
+    runtime_input_revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )

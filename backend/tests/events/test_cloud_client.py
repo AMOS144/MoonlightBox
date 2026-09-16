@@ -179,6 +179,35 @@ def test_request_uses_strict_json_schema_and_deterministic_messages() -> None:
     }
 
 
+def test_call_can_narrow_output_timeout_and_retry_budget() -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        raise httpx.ReadTimeout("slow provider", request=request)
+
+    client = make_cloud_client(handle, max_retries=3, timeout_seconds=60)
+    with pytest.raises(NodeAnalysisCloudError) as caught:
+        client.create_structured_completion(
+            system_content="系统内容",
+            user_content="用户内容",
+            response_model=ExampleResult,
+            max_output_tokens=1024,
+            request_timeout_seconds=7.5,
+            request_max_retries=0,
+        )
+
+    assert caught.value.code is NodeAnalysisCloudErrorCode.TIMEOUT
+    assert len(requests) == 1
+    assert json.loads(requests[0].content)["max_tokens"] == 1024
+    assert requests[0].extensions["timeout"] == {
+        "connect": 7.5,
+        "read": 7.5,
+        "write": 7.5,
+        "pool": 7.5,
+    }
+
+
 def test_deepseek_json_object_request_is_exact_and_locally_validated() -> None:
     requests: list[httpx.Request] = []
 
@@ -444,7 +473,33 @@ def test_minimax_request_splits_reasoning_from_structured_content() -> None:
     assert complete(client).label == "正常"
     body = json.loads(requests[0].content)
     assert body["reasoning_split"] is True
+    assert body["max_completion_tokens"] == 8192
+    assert "max_tokens" not in body
     assert "thinking" not in body
+
+
+def test_minimax_m3_honors_disabled_thinking_mode_for_structured_output() -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"label":"正常","score":1}'}}]},
+        )
+
+    client = make_cloud_client(
+        handle,
+        endpoint="https://api.minimaxi.com/v1/chat/completions",
+        model="MiniMax-M3",
+        response_format="json_object",
+        thinking_mode="disabled",
+    )
+
+    assert complete(client).label == "正常"
+    body = json.loads(requests[0].content)
+    assert body["reasoning_split"] is True
+    assert body["thinking"] == {"type": "disabled"}
 
 
 @pytest.mark.parametrize(
@@ -1212,7 +1267,9 @@ def test_invalid_message_json_is_classified_without_retry() -> None:
     error = assert_error_code(client, NodeAnalysisCloudErrorCode.INVALID_RESPONSE)
     assert error.attempts == 1
     assert error.retryable is False
-    assert error.diagnostic == {"http_status": 200}
+    assert error.diagnostic["http_status"] == 200
+    assert error.diagnostic["validation_error_count"] == 1
+    assert error.diagnostic["validation_error_types"] == "json_invalid"
 
 
 @pytest.mark.parametrize(
@@ -1509,7 +1566,7 @@ def test_settings_use_safe_structured_output_defaults() -> None:
     settings = Settings.model_construct()
 
     assert settings.node_analysis_response_format == "json_schema"
-    assert settings.node_analysis_thinking_mode == "disabled"
+    assert settings.node_analysis_thinking_mode == "default"
     assert settings.node_analysis_max_output_tokens == 8192
 
 

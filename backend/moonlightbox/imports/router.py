@@ -16,12 +16,6 @@ from sqlalchemy.orm import Session
 
 from moonlightbox.config import Settings
 from moonlightbox.db import Database
-from moonlightbox.events.config import config_fingerprint
-from moonlightbox.imports.analysis_job import (
-    V3_ANALYSIS_JOB_KIND,
-    build_v3_analysis_job_snapshot,
-    v3_analysis_dedupe_key,
-)
 from moonlightbox.imports.schemas import (
     ImportConfirm,
     ImportConfirmRead,
@@ -33,7 +27,6 @@ from moonlightbox.imports.service import (
     UnsupportedImportFormatError,
 )
 from moonlightbox.jobs.models import Job
-from moonlightbox.jobs.service import InvalidJobTransitionError, JobService
 from moonlightbox.spatial.jobs import (
     enqueue_spatial_analysis,
 )
@@ -119,16 +112,7 @@ def create_imports_router(
             if settings.lightrag_enabled
             else None
         )
-        job = (
-            None
-            if world_job is not None
-            else _ensure_analysis_job(
-                session,
-                project_id,
-                result.import_id,
-                settings,
-            )
-        )
+        # 未配置图谱也允许从工作台手动调查原文，但不再自动回退旧事件评分器。
         spatial_job = (
             _ensure_spatial_job(
                 session,
@@ -141,39 +125,13 @@ def create_imports_router(
         )
         return result.model_copy(
             update={
-                "analysis_job_id": job.id if job is not None else None,
+                "analysis_job_id": None,
                 "world_job_id": world_job.id if world_job is not None else None,
                 "spatial_job_id": spatial_job.id if spatial_job is not None else None,
             }
         )
 
     return router
-
-
-def _ensure_analysis_job(
-    session: Session,
-    project_id: str,
-    import_id: str,
-    settings: Settings,
-) -> Job:
-    service = JobService(session)
-    snapshot = build_v3_analysis_job_snapshot(settings)
-    job = service.enqueue_unique(
-        V3_ANALYSIS_JOB_KIND,
-        {
-            "project_id": project_id,
-            "import_id": import_id,
-            "analysis_config": snapshot,
-            "config_fingerprint": config_fingerprint(snapshot),
-        },
-        dedupe_key=v3_analysis_dedupe_key(import_id, snapshot),
-    )
-    if job.status not in {"failed", "interrupted"}:
-        return job
-    try:
-        return service.resume(job.id)
-    except InvalidJobTransitionError:
-        return service.get(job.id)
 
 
 def _ensure_spatial_job(
