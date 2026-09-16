@@ -1,98 +1,38 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, expect, test, vi } from 'vitest'
-
 import { ProjectTaskBar } from './ProjectTaskBar'
 import { TestThemeProvider } from '../../test/TestThemeProvider'
+import { journeyKey } from '../journey/journey'
 
-afterEach(() => {
-  cleanup()
-  vi.unstubAllGlobals()
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+test('概览不重复呈现全局流程报错', () => {
+  const client = new QueryClient({ defaultOptions: { queries: { enabled: false } } })
+  client.getQueryCache().build(client, { queryKey: journeyKey('p1') }).setState({ status: 'error', error: new Error('请求失败') })
+  render(<TestThemeProvider><QueryClientProvider client={client}><MemoryRouter initialEntries={['/projects/p1']}>
+    <ProjectTaskBar projectId="p1" />
+  </MemoryRouter></QueryClientProvider></TestThemeProvider>)
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 })
-
-test('刷新或切换页面后从后端恢复正在训练的任务', async () => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify([
-          {
-            id: 'job-1',
-            kind: 'digital_human_training_v1',
-            payload: { project_id: 'project-1' },
-            status: 'running',
-            progress: 0.255,
-            checkpoint: {
-              stage: 'training',
-              iteration: 90,
-              total_iterations: 600,
-            },
-            error_code: null,
-            error_message: null,
-            created_at: '2026-07-20T09:00:00Z',
-            updated_at: '2026-07-20T09:30:00Z',
-          },
-        ]),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      ),
-    ),
-  )
-
-  render(
-    <TestThemeProvider>
-      <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter>
-          <ProjectTaskBar projectId="project-1" />
-        </MemoryRouter>
-      </QueryClientProvider>
-    </TestThemeProvider>,
-  )
-
-  expect(await screen.findByText('正在训练数字人')).toBeInTheDocument()
-  expect(screen.getByText(/26%/)).toBeInTheDocument()
-  expect(screen.getByRole('link', { name: '查看训练进度' })).toHaveAttribute(
-    'href',
-    '/projects/project-1/training/job-1',
-  )
+test('没有运行 Job 时仍显示需要用户回答的阶段', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+    processing: false, tasks: [], next_action: { action: 'import' }, stages: [{ key: 'import', label: '导入记录', state: 'needs_user', detail: '那几天去旅行了吗？' }],
+  }))))
+  render(<TestThemeProvider><QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={['/projects/p1/setup/import']}>
+    <ProjectTaskBar projectId="p1" />
+  </MemoryRouter></QueryClientProvider></TestThemeProvider>)
+  expect(await screen.findByText('需要你操作')).toBeInTheDocument()
+  expect(screen.getByText('那几天去旅行了吗？')).toBeInTheDocument()
+  expect(screen.queryByText(/训练/)).not.toBeInTheDocument()
 })
-
-test('历史失败任务不会冒充当前未完成任务', async () => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify([
-          {
-            id: 'old-failed-job',
-            kind: 'digital_human_training_v1',
-            payload: { project_id: 'project-1' },
-            status: 'failed',
-            progress: 0.9,
-            checkpoint: { stage: 'model_acceptance' },
-            error_code: 'training_quality_gate_failed',
-            error_message: '旧候选没有通过',
-            created_at: '2026-08-04T05:00:00Z',
-            updated_at: '2026-08-04T05:45:00Z',
-          },
-        ]),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      ),
-    ),
-  )
-
-  render(
-    <TestThemeProvider>
-      <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter>
-          <ProjectTaskBar projectId="project-1" />
-        </MemoryRouter>
-      </QueryClientProvider>
-    </TestThemeProvider>,
-  )
-
-  await vi.waitFor(() => expect(fetch).toHaveBeenCalled())
-  expect(screen.queryByText(/未完成/)).not.toBeInTheDocument()
-  expect(screen.queryByRole('status')).not.toBeInTheDocument()
+test('起点选择页内已展示调查状态，顶部不再重复提示', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+    processing: false, tasks: [], next_action: { action: 'nodes' }, stages: [{ key: 'nodes', label: '调查并选择起点', state: 'needs_user', detail: '那几天去旅行了吗？' }],
+  }))))
+  render(<TestThemeProvider><QueryClientProvider client={new QueryClient()}><MemoryRouter initialEntries={['/projects/p1/nodes']}>
+    <ProjectTaskBar projectId="p1" />
+  </MemoryRouter></QueryClientProvider></TestThemeProvider>)
+  await waitFor(() => expect(screen.queryByText('调查并选择起点')).not.toBeInTheDocument())
   expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 })

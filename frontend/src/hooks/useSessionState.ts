@@ -19,7 +19,11 @@ export function useSessionState<T>(
           typeof next === 'function'
             ? (next as (previous: T) => T)(currentValue)
             : next
-        window.sessionStorage.setItem(key, JSON.stringify(resolved))
+        try {
+          window.sessionStorage.setItem(key, JSON.stringify(resolved))
+        } catch {
+          // 隐私模式或容量不足时仍保留本次页面输入，不能让保存草稿拖垮工作台。
+        }
         return { key, value: resolved }
       })
     },
@@ -29,12 +33,11 @@ export function useSessionState<T>(
 }
 
 function readValue<T>(key: string, initialValue: T): T {
-  const stored = window.sessionStorage.getItem(key)
-  if (stored === null) return initialValue
   try {
+    const stored = window.sessionStorage.getItem(key)
+    if (stored === null) return initialValue
     return JSON.parse(stored) as T
   } catch {
-    window.sessionStorage.removeItem(key)
     return initialValue
   }
 }

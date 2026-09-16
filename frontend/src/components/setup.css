@@ -1,0 +1,39 @@
+/* 短流程统一栏宽和操作位置；不把表单垂直居中，避免校验信息出现时整体跳动。 */
+.setup-page { width: 100%; max-width: 880px; min-width: 0; margin-inline: auto; }
+.project-page--setup { max-width: 880px; }
+.setup-header { margin-bottom: 8px; }
+.setup-steps { margin-bottom: 24px; }
+.setup-steps .mantine-Stepper-step { align-items: center; }
+.setup-steps .mantine-Stepper-stepIcon {
+  background: transparent; border: 1px solid var(--line-strong); color: var(--faint);
+  font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+.setup-steps .mantine-Stepper-step[data-progress] .mantine-Stepper-stepIcon {
+  background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600;
+}
+.setup-steps .mantine-Stepper-step[data-completed] .mantine-Stepper-stepIcon {
+  background: transparent; border-color: var(--accent); color: var(--accent-strong);
+}
+.setup-steps .mantine-Stepper-stepLabel { color: var(--muted); font-size: 12px; font-weight: 500; }
+.setup-steps .mantine-Stepper-step[data-progress] .mantine-Stepper-stepLabel { color: var(--text); font-weight: 600; }
+.setup-steps .mantine-Stepper-separator { background: var(--line); height: 1px; margin-inline: 10px; }
+.setup-steps .mantine-Stepper-separator[data-active] { background: var(--accent); }
+.setup-form { padding-block: 16px; }
+.setup-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 12px; padding-top: 20px; margin-top: 12px; border-top: 1px solid var(--line); }
+.setup-source { display: flex; align-items: center; gap: 16px; }
+.setup-source-copy { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.setup-summary { display: flex; flex-wrap: wrap; gap: 8px 24px; color: var(--muted); font-size: 13px; }
+.setup-people { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.setup-page .mantine-Alert-message { overflow-wrap: anywhere; }
+@media (max-width: 48em) {
+  /* 手机外壳已有左右内边距，不能再次把外层限制为 760px。 */
+  .project-page--setup { max-width: none; }
+}
+@media (max-width: 36em) {
+  .setup-steps .mantine-Stepper-stepLabel { font-size: 11px; }
+  .setup-steps .mantine-Stepper-separator { min-width: 8px; margin-inline: 6px; }
+  .setup-people { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .setup-source { flex-wrap: wrap; gap: 12px; }
+  .setup-source-copy { min-width: 160px; }
+}

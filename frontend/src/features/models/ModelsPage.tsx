@@ -20,11 +20,11 @@ export function ModelsPage() {
   return (
     <Stack gap="xl">
       <SectionNav items={personaNav} label="数字人" />
-      <div><Text c="moon.4" fw={700} size="xs">数字人</Text><Title mt={5} order={1}>版本与质量</Title><Text c="dimmed" mt={7}>查看正在使用的版本，技术参数不会影响日常对话。</Text></div>
+      <Title order={1}>模型版本</Title>
       {models.isLoading ? <SimpleGrid cols={{ base: 1, md: 2 }}><Skeleton h={220} /><Skeleton h={220} /></SimpleGrid> : null}
       {models.isError ? <Alert color="red" role="alert" title="读取失败">模型状态读取失败，请重试。</Alert> : null}
       {models.isSuccess && models.data.length === 0 ? (
-        <Alert color="gray" role="status" title="还没有数字人版本">确认重要回忆后会自动开始训练，进度显示在页面顶部。</Alert>
+        <Alert color="gray" role="status" title="还没有可选训练模型">LoRA 为可选训练资产，当前聊天不依赖此项。</Alert>
       ) : null}
       <SimpleGrid cols={{ base: 1, md: 2 }}>
         {models.data?.map((model) => (

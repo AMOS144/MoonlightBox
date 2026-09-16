@@ -107,8 +107,8 @@ export function EvaluationPage() {
       <SectionNav items={personaNav} label="数字人" />
       <div>
         <Text c="moon.4" fw={700} size="xs">真人盲测</Text>
-        <Title mt={5} order={1}>哪一句更像真实的她</Title>
-        <Text c="dimmed" mt={7}>选项顺序已随机隐藏。新版本只有完成至少 20 次真人判断后，才可能接管聊天。</Text>
+        <Title mt={5} order={1}>回复评估</Title>
+        <Text c="dimmed" mt={7}>选项顺序随机，请选择更符合目标人物表达的回复。</Text>
       </div>
       {studies.isLoading || cases.isLoading ? <Skeleton h={260} /> : null}
       {studies.isError || cases.isError ? <Alert color="red">盲测读取失败，请刷新重试。</Alert> : null}

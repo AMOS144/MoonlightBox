@@ -1,117 +1,75 @@
+import { Accordion, Avatar, Button, Divider, Group, Paper, Stack, Text, Title } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
-import { Alert, Badge, Button, Card, Group, Loader, Paper, Progress, SimpleGrid, Stack, Text, ThemeIcon, Title } from '@mantine/core'
 import { Link, useParams } from 'react-router-dom'
-
 import { request } from '../../api/client'
-import { Icon } from '../../components/Icon'
-import type { RuntimeBranch } from '../branches/types'
-import type { EventNode } from '../events/types'
-import type { ModelVersion } from '../models/types'
-import type { Project } from './ProjectListPage'
-
-type ProjectJob = {
-  id: string
-  kind: string
-  status: string
-  progress: number
-}
+import { AsyncState } from '../../components/feedback/AsyncState'
+import { StageStatus } from '../../components/feedback/StageStatus'
+import { JourneyTasks } from '../journey/JourneyTasks'
+import { actionPath, useJourney } from '../journey/journey'
+import type { Project } from './types'
+import { PageHeader } from '../../components/PageHeader'
+import { BranchCard } from '../branches/BranchCard'
+import './projects.css'
 
 export function ProjectOverviewPage() {
-  const { projectId } = useParams()
-  const project = useQuery({
-    queryKey: ['project', projectId],
-    queryFn: () => request<Project>(`/api/projects/${projectId}`),
-    enabled: Boolean(projectId),
-  })
-  const events = useQuery({
-    queryKey: ['events', projectId],
-    queryFn: () => request<EventNode[]>(`/api/projects/${projectId}/events`),
-    enabled: Boolean(projectId),
-  })
-  const models = useQuery({
-    queryKey: ['models', projectId],
-    queryFn: () => request<ModelVersion[]>(`/api/projects/${projectId}/models`),
-    enabled: Boolean(projectId),
-  })
-  const branches = useQuery({
-    queryKey: ['runtime-branches', projectId],
-    queryFn: () => request<RuntimeBranch[]>(`/api/projects/${projectId}/runtime/branches`),
-    enabled: Boolean(projectId),
-  })
-  const jobs = useQuery({
-    queryKey: ['project-jobs', projectId],
-    queryFn: () => request<ProjectJob[]>(`/api/jobs?project_id=${projectId}`),
-    enabled: Boolean(projectId),
-  })
-
-  if (project.isLoading) return <Group justify="center" py={80}><Loader aria-label="正在打开这段回忆" /></Group>
-  if (project.isError || !project.data) {
-    return <Alert color="red" role="alert" title="项目读取失败">请返回项目列表后重试。</Alert>
-  }
-
-  const activeJob = jobs.data?.find((job) => ['queued', 'running'].includes(job.status))
-  const activeModel = models.data?.find((model) => model.active)
-  const activeEvents = events.data?.filter((event) => !['rejected', 'superseded'].includes(event.status)) ?? []
-  const recentBranches = [...(branches.data ?? [])]
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))
-    .slice(0, 3)
-  const next = getNextAction(activeJob, activeEvents, activeModel)
-
-  return (
-    <Stack gap={36} maw={1120} mx="auto">
-      <Group align="flex-end" justify="space-between" wrap="wrap">
-        <div>
-          <Text c="moon.4" fw={700} size="xs">私人记忆档案</Text>
-          <Title mt={6} order={1}>{project.data.name}</Title>
-          <Text c="dimmed" mt={8}>把聊天整理成回忆，从某个时刻重新开始。</Text>
-        </div>
-        <Button component={Link} leftSection={<Icon name={next.icon} size={17} />} size="md" to={next.to}>
-          {next.label}
-        </Button>
-      </Group>
-
-      <Paper p="xl" withBorder>
+  const { projectId = '' } = useParams()
+  const project = useQuery({ queryKey: ['project', projectId], queryFn: () => request<Project>(`/api/projects/${projectId}`) })
+  const journey = useJourney(projectId)
+  const value = journey.data
+  const person = value?.participants?.find(p => p.role === 'target')
+  const ready = value?.branches.find(b => b.lifecycle_status === 'active')
+  const primaryPath = ready ? actionPath(projectId, 'branch', ready.id) : value ? actionPath(projectId, value.next_action.action, value.next_action.object_id) : null
+  const otherBranches = value?.branches.filter(b => b.id !== ready?.id) ?? []
+  // 去重操作入口，不隐藏待办的失败、问题或审批说明。
+  return <Stack className="project-overview" gap="lg">
+    <PageHeader title={project.data?.name ?? '项目概览'} />
+    <AsyncState loading={journey.isLoading} error={journey.error || project.error} retry={() => { void journey.refetch(); void project.refetch() }} />
+    {value && <>
+      <Paper withBorder p="lg">
         <Group align="flex-start" wrap="nowrap">
-        <ThemeIcon color="moon" radius="xl" size={48} variant="light">{next.step}</ThemeIcon>
-        <div>
-          <Text c="dimmed" size="xs">现在最适合做的事</Text>
-          <Title mt={3} order={3}>{next.title}</Title>
-          <Text c="dimmed" mt={5} size="sm">{next.description}</Text>
-        </div>
+          <Avatar size={64} radius="xl" src={person?.avatar_asset_id ? `/api/projects/${projectId}/media/${person.avatar_asset_id}` : undefined} alt={person?.name}>{person?.name?.slice(-2)}</Avatar>
+          <Stack gap="sm" style={{ minWidth: 0, flex: 1 }}>
+            <Title order={2}>{person?.name || '确认聊天中的人物'}</Title>
+            {ready ? <>
+              <Text size="sm" c="dimmed">{ready.title}</Text>
+              <Text className="conversation-preview" lineClamp={3}>{ready.latest_message ? `${['self', 'user'].includes(ready.latest_message.role) ? '你' : person?.name ?? '对方'}：${ready.latest_message.text}` : '还没有新的消息'}</Text>
+              <Group><Button component={Link} to={`branches/${ready.id}`}>继续聊天</Button></Group>
+            </> : <>
+              <Text size="sm" c="dimmed">{value.next_action.detail}</Text>
+              <Group><Button component={Link} to={actionPath(projectId, value.next_action.action, value.next_action.object_id)}>{value.next_action.label}</Button></Group>
+            </>}
+          </Stack>
         </Group>
-        {activeJob ? <Progress mt="lg" value={activeJob.progress * 100} /> : null}
       </Paper>
-
-      <SimpleGrid aria-label="项目概况" cols={{ base: 1, sm: 3 }} spacing={0}>
-        {[[activeEvents.length, '段重要回忆'], [models.data?.length ?? 0, '个数字人版本'], [branches.data?.length ?? 0, '条平行时间线']].map(([value, label]) => (
-          <Paper key={label} p="lg" radius={0} withBorder><Title c="moon.3" order={2}>{value}</Title><Text c="dimmed" size="sm">{label}</Text></Paper>
-        ))}
-      </SimpleGrid>
-
-      <section>
-        <Group justify="space-between" mb="md"><Title order={2}>最近的平行时间线</Title><Button component={Link} to="branches" variant="subtle">查看全部</Button></Group>
-        {recentBranches.length ? (
-          <SimpleGrid cols={{ base: 1, sm: 3 }}>
-            {recentBranches.map((branch) => (
-              <Card component={Link} key={branch.id} padding="lg" to={`branches/${branch.id}`} withBorder>
-                <Badge color={branch.lifecycle_status === 'active' ? 'green' : 'gray'} variant="light">{branch.lifecycle_status === 'active' ? '进行中' : '只读'}</Badge>
-                <Title mt="md" order={4}>{branch.title}</Title>
-                <Text c="dimmed" mt={5} size="sm">从 {new Date(branch.origin_time).toLocaleDateString('zh-CN')} 开始</Text>
-              </Card>
-            ))}
-          </SimpleGrid>
-        ) : (
-          <Paper p="xl" ta="center" withBorder><Title order={4}>还没有平行时间线</Title><Text c="dimmed" mt={5}>训练完成后，可以从任意一段重要回忆重新开始。</Text></Paper>
-        )}
-      </section>
-    </Stack>
-  )
-}
-
-function getNextAction(job: ProjectJob | undefined, events: EventNode[], model: ModelVersion | undefined) {
-  if (job?.kind === 'digital_human_training_v1') return { step: '03', title: '数字人正在学习表达方式', description: '训练在后台继续进行，可以随时查看详细进度。', label: '查看训练进度', to: `training/${job.id}`, icon: 'activity' as const }
-  if (job) return { step: '02', title: '正在整理聊天中的重要回忆', description: '系统正在分析关系变化与共同经历。', label: '查看处理进度', to: 'data', icon: 'activity' as const }
-  if (model) return { step: '04', title: '选择一个想回去的时刻', description: '数字人已经准备好，从关系时间轴选择新的起点。', label: '进入关系时间轴', to: 'timeline', icon: 'timeline' as const }
-  if (events.length) return { step: '02', title: '确认系统找到的重要回忆', description: '排除误报并确认时间轴后，系统会开始训练数字人。', label: '审核重要回忆', to: 'events', icon: 'nodes' as const }
-  return { step: '01', title: '导入一段真实聊天', description: '选择完整的 WxEcho 导出目录，系统会保留原始记录并单独处理副本。', label: '开始导入聊天', to: 'data', icon: 'database' as const }
+      <Stack gap="lg">
+        {value.tasks.length > 0 && <section><Title order={3} mb="sm">待处理</Title><JourneyTasks journey={value} existingPaths={[primaryPath]} /></section>}
+        {otherBranches.length > 0 && <section className="overview-section">
+          <Group justify="space-between" mb="sm"><Title order={3}>{ready ? '其他分支' : '我的分支'}</Title>{otherBranches.length > 5 && <Button component={Link} to="branches" variant="subtle">查看全部</Button>}</Group>
+          <Stack gap="xs">{otherBranches.slice(0, 5).map(b => <BranchCard key={b.id} branch={b} to={`branches/${b.id}`} />)}</Stack>
+        </section>}
+      </Stack>
+      <Accordion variant="separated">
+        <Accordion.Item value="details">
+          <Accordion.Control>资料详情</Accordion.Control>
+          <Accordion.Panel><Stack gap="sm">
+            <Group justify="space-between"><Text c="dimmed" size="sm">导入记录</Text><Text size="sm">{(value.imports ?? []).reduce((n, i) => n + i.message_count, 0).toLocaleString('zh-CN')} 条</Text></Group>
+            <Group justify="space-between"><Text c="dimmed" size="sm">参与者</Text><Text size="sm">{(value.participants ?? []).filter(p => ['self', 'target'].includes(p.role)).map(p => p.name).join('、') || '未确认'}</Text></Group>
+            <Group justify="space-between"><Text c="dimmed" size="sm">人物背景</Text><Text size="sm">{value.publication ? '已发布' : '未发布'}</Text></Group>
+          </Stack></Accordion.Panel>
+        </Accordion.Item>
+        {value.stages.length > 0 && <Accordion.Item value="stages">
+          <Accordion.Control>准备流程</Accordion.Control>
+          <Accordion.Panel><Stack gap={4}>
+            {value.stages.map((stage, index) => <div key={stage.key}>
+              {index > 0 && <Divider mb={4} />}
+              <Group justify="space-between" py={4}>
+                <Button component={Link} variant="subtle" color="gray" to={actionPath(projectId, stage.action, stage.object_id)}>{stage.label}</Button>
+                <StageStatus state={stage.state} />
+              </Group>
+            </div>)}
+          </Stack></Accordion.Panel>
+        </Accordion.Item>}
+      </Accordion>
+    </>}
+  </Stack>
 }

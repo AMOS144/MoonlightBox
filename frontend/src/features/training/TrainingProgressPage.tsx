@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { userMessage } from '../../components/feedback/messages'
 import {
   Alert,
   Badge,
@@ -14,7 +15,7 @@ import {
   Text,
   Title,
 } from '@mantine/core'
-import { IconAlertCircle, IconCheck } from '@tabler/icons-react'
+import { Icon } from '../../components/Icon'
 import { Link, useParams } from 'react-router-dom'
 
 import { request } from '../../api/client'
@@ -41,7 +42,7 @@ export function TrainingProgressPage() {
     enabled: Boolean(jobId),
     refetchInterval: (query) => {
       const status = query.state.data?.status
-      return status === 'queued' || status === 'running' ? 1500 : false
+      return status === 'queued' || status === 'running' || status === 'cancelling' ? 1500 : false
     },
   })
   const cancel = useMutation({
@@ -66,7 +67,7 @@ export function TrainingProgressPage() {
         <Title order={1}>{STAGE_LABELS[stage] ?? '等待训练任务开始'}</Title>
       </div>
       {job.isLoading && <Text c="dimmed">正在读取训练状态……</Text>}
-      {job.isError && <Alert color="red" icon={<IconAlertCircle />} title="读取失败">训练状态读取失败，请稍后重试。</Alert>}
+      {job.isError && <Alert color="red" icon={<Icon name="warning" />} title="读取失败">训练状态读取失败，请稍后重试。</Alert>}
       {data && (
         <>
           <Paper p="lg" radius="md" withBorder>
@@ -123,7 +124,7 @@ export function TrainingProgressPage() {
                 ))}
               </Group>
               {acceptance.failure_reasons.map((reason) => (
-                <Alert color="red" icon={<IconAlertCircle />} key={reason} mt="sm">{reason}</Alert>
+                <Alert color="red" icon={<Icon name="warning" />} key={reason} mt="sm">{userMessage(reason)}</Alert>
               ))}
             </Paper>
           )}
@@ -146,20 +147,22 @@ export function TrainingProgressPage() {
             </Button>
           )}
           {data.status === 'cancelled' && <Alert color="gray">训练已取消</Alert>}
+          {data.status === 'cancelling' && <Alert color="gray">正在取消，等待执行退出</Alert>}
           {(data.status === 'failed' || data.status === 'interrupted') && (
-            <Alert color="red" icon={<IconAlertCircle />} title="训练未完成">
-              训练未完成（{data.error_code ?? 'training_failed'}）：
-              {data.error_message ?? '可以恢复任务后重试。'}
+            <Alert color="red" icon={<Icon name="warning" />} title="训练未完成">
+              {acceptance?.failure_reasons.includes(data.error_message ?? '')
+                ? '请查看上方检查结果，处理后再恢复任务。'
+                : userMessage(data.error_message ?? '可以恢复任务后重试。')}
             </Alert>
           )}
           {data.status === 'succeeded' && (
-            <Alert color="green" icon={<IconCheck />} title="训练完成">
+            <Alert color="green" icon={<Icon name="check" />} title="训练完成">
               <Text mb="sm">
                 {checkpoint?.model_version_id
                   ? `新模型已原子启用：${checkpoint.model_version_id}`
                   : '训练已完成，模型状态以验收报告为准。'}
               </Text>
-              <Button component={Link} size="xs" to={`/projects/${projectId}/timeline`}>进入时间轴</Button>
+              <Button component={Link} size="xs" to={`/projects/${projectId}/models`}>查看模型</Button>
             </Alert>
           )}
         </>

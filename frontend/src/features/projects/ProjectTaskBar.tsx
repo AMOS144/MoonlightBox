@@ -1,100 +1,25 @@
-import { useQuery } from '@tanstack/react-query'
-import { Alert, Button, Group, Progress, Stack, Text } from '@mantine/core'
-import { Link } from 'react-router-dom'
-
-import { request } from '../../api/client'
-import { IconLoader2 } from '@tabler/icons-react'
-
-type ProjectJob = {
-  id: string
-  kind: string
-  payload: Record<string, unknown>
-  status: string
-  progress: number
-  checkpoint: Record<string, unknown> | null
-  error_code: string | null
-  error_message: string | null
-  created_at: string
-  updated_at: string
-}
-
-const visibleKinds = new Set([
-  'event_analysis_v2',
-  'event_analysis_v3',
-  'digital_human_training_v1',
-  'lightrag_world_build_v1',
-])
+import { Alert, Button, Group, Text } from '@mantine/core'
+import { useLocation } from 'react-router-dom'
+import { useJourney } from '../journey/journey'
+import { StageStatus } from '../../components/feedback/StageStatus'
+import { WorldBuildStatus } from './WorldBuildStatus'
 
 export function ProjectTaskBar({ projectId }: { projectId: string }) {
-  const jobs = useQuery({
-    queryKey: ['project-jobs', projectId],
-    queryFn: () =>
-      request<ProjectJob[]>(`/api/jobs?project_id=${encodeURIComponent(projectId)}`),
-    refetchInterval: (query) =>
-      (query.state.data ?? []).some((job) =>
-        ['queued', 'running'].includes(job.status),
-      )
-        ? 1500
-        : false,
-  })
-  const job = [...(jobs.data ?? [])]
-    .filter((candidate) =>
-      visibleKinds.has(candidate.kind) &&
-      ['queued', 'running'].includes(candidate.status))
-    .sort((left, right) => right.updated_at.localeCompare(left.updated_at))[0]
-  if (!job) return null
-  const label = taskLabel(job)
-  const link = taskLink(projectId, job)
-
-  return (
-    <Alert
-      color="moon"
-      icon={<IconLoader2 />}
-      role="status"
-      variant="light"
-    >
-      <Group justify="space-between" wrap="nowrap">
-        <Stack gap={4} style={{ flex: 1 }}>
-        <Text fw={700}>{label}</Text>
-        <Text c="dimmed" size="sm">
-          {`${Math.round(job.progress * 100)}%${iterationLabel(job)}`}
-        </Text>
-        <Progress value={job.progress * 100} size="xs" />
-        </Stack>
-        <Button component={Link} size="xs" to={link} variant="subtle">
-          {linkLabel(job)}
-        </Button>
-      </Group>
-    </Alert>
-  )
-}
-
-function taskLabel(job: ProjectJob): string {
-  if (job.kind === 'digital_human_training_v1') return '正在训练数字人'
-  if (job.kind === 'lightrag_world_build_v1') return '正在重建人物世界'
-  return '正在分析关键节点'
-}
-
-function linkLabel(job: ProjectJob): string {
-  if (job.kind === 'digital_human_training_v1') return '查看训练进度'
-  if (job.kind === 'lightrag_world_build_v1') return '查看人物背景'
-  return '查看分析进度'
-}
-
-function taskLink(projectId: string, job: ProjectJob): string {
-  if (job.kind === 'digital_human_training_v1') {
-    return `/projects/${projectId}/training/${job.id}`
+  const journey = useJourney(projectId)
+  const { pathname } = useLocation()
+  const relative = pathname.split(`/projects/${projectId}/`)[1] ?? ''
+  const key = relative.startsWith('setup/import') ? 'import' : relative.startsWith('setup/participants') ? 'participants' : relative.startsWith('world') ? 'profile' : relative.startsWith('nodes') ? 'nodes' : relative === 'branches/new' ? 'prepare' : null
+  // 概览自己承载读取错误；不在页面上方重复展示同一个失败。
+  // participants 和 nodes 页内已展示各自阶段状态，顶部不再重复提示。
+  if (!key || key === 'participants' || key === 'nodes') return null
+  if (!journey.data) return journey.isError ? <Alert color="red" mb="lg">流程状态读取失败，当前页面仍可使用。<Button variant="subtle" onClick={() => void journey.refetch()}>重试</Button></Alert> : null
+  if (['profile', 'participants', 'import'].includes(key) && journey.data.world_build && journey.data.world_build.status !== 'succeeded') {
+    return <WorldBuildStatus key={journey.data.world_build.id} projectId={projectId} build={journey.data.world_build} />
   }
-  if (job.kind === 'lightrag_world_build_v1') {
-    return `/projects/${projectId}/world`
-  }
-  return `/projects/${projectId}/data`
-}
-
-function iterationLabel(job: ProjectJob): string {
-  const iteration = job.checkpoint?.iteration
-  const total = job.checkpoint?.total_iterations
-  return typeof iteration === 'number' && typeof total === 'number'
-    ? ` · ${iteration}/${total}`
-    : ''
+  const stage = journey.data.stages.find(s => s.key === key)
+  // 稳定状态在内容区展示；顶部只保留需要注意的执行状态。
+  if (!stage || ['not_started', 'confirmed', 'completed'].includes(stage.state)) return null
+  return <Alert color="gray" mb="lg" className="project-stage"><Group justify="space-between">
+    <Group><Text fw={600}>{stage.label}</Text>{stage.state !== 'not_started' && <StageStatus state={stage.state} />}</Group>
+  </Group>{['needs_user', 'blocked', 'paused'].includes(stage.state) && <Text size="sm" mt="xs">{stage.detail}</Text>}</Alert>
 }

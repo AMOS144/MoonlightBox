@@ -118,8 +118,7 @@ export function SpatialHeatmapPage() {
       <SectionNav items={worldNav} label="世界" />
       <Group align="flex-end" justify="space-between" wrap="wrap">
         <div>
-          <Text c="moon.4" fw={700} size="xs">PERSONAL PLACE GRAPH</Text>
-          <Title mt={6} order={1}>{data.properties.person_name}的活动地图</Title>
+          <Title order={1}>{data.properties.person_name}的活动地图</Title>
           <Text c="dimmed" mt={8}>由聊天证据聚合的长期活动范围，不代表实时位置。</Text>
         </div>
         <Badge color={data.properties.reliability && data.properties.reliability >= 0.7 ? 'green' : 'yellow'} size="lg" variant="light">
@@ -339,7 +338,8 @@ function AmapHeatmap({
       .catch((error: unknown) => {
         const detail = error instanceof Error ? error.message : String(error)
         console.error('AMap heatmap initialization failed', error)
-        setMapError(`高德热图初始化失败：${detail}`)
+        console.warn('地图初始化失败', detail)
+        setMapError('地图暂时无法显示，请稍后重新打开。地点资料不受影响。')
       })
     return () => {
       cancelled = true
@@ -351,7 +351,7 @@ function AmapHeatmap({
   if (!key) {
     return (
       <div className="spatial-map-empty">
-        <Title order={3}>热图数据已经准备好</Title>
+        <Title order={3}>地图数据已加载</Title>
         <Text c="dimmed" maw={480} ta="center">
           配置 VITE_AMAP_JS_KEY 后显示高德底图和 Loca 热力层；地点权重仍可在右侧查看。
         </Text>

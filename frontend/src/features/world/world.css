@@ -1,0 +1,123 @@
+.person-world-workbench { min-width: 0; }
+.profile-reading-layout { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 24px; }
+.profile-section-nav { position: sticky; top: 16px; align-self: start; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.profile-section-nav a { padding: 7px 8px; border-radius: 4px; }
+.profile-section-nav a:hover { color: var(--text); background: var(--surface-soft); }
+.profile-reading-content { min-width: 0; max-width: 82ch; line-height: 1.7; }
+.profile-reading-content > [id] { scroll-margin-top: 20px; }
+.profile-reading-content .mantine-Text-root[data-size="sm"] { font-size: 14px; line-height: 1.7; }
+.person-world-workbench--agent-open .profile-reading-layout { grid-template-columns: minmax(0, 1fr); }
+.person-world-workbench--agent-open .profile-section-nav { position: static; flex-direction: row; flex-wrap: wrap; }
+@media (max-width: 48em) {
+  .profile-reading-layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .profile-section-nav { position: static; flex-direction: row; overflow-x: auto; white-space: nowrap; }
+}
+
+.person-world-workbench--agent-open {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 430px);
+  gap: 24px;
+  align-items: start;
+}
+
+.person-world-workbench__profile { min-width: 0; }
+
+.person-world-agent-panel {
+  position: sticky;
+  top: 24px;
+  display: flex;
+  overflow: hidden;
+  min-width: 0;
+  height: calc(100vh - 48px);
+  flex-direction: column;
+  background: color-mix(in srgb, var(--surface) 96%, black);
+}
+
+.person-world-agent-panel__body { min-height: 0; flex: 1; }
+
+.person-world-agent-panel__footer {
+  padding: 12px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+
+.person-world-message--user {
+  margin-left: 28px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-raised));
+}
+
+.person-world-message--assistant { margin-right: 18px; }
+
+.profile-statement { transition: border-color 140ms ease, box-shadow 140ms ease; }
+
+.profile-statement__button {
+  display: flex;
+  width: 100%;
+  gap: 10px;
+  padding: 12px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.profile-statement__button:disabled { opacity: 0.74; cursor: not-allowed; }
+
+.profile-statement__check {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  place-items: center;
+  color: var(--accent-ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.profile-statement__content { min-width: 0; flex: 1; }
+
+.profile-statement--selected {
+  border-color: var(--accent) !important;
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.profile-statement--selected .profile-statement__check {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+@media (max-width: 1180px) {
+  .person-world-workbench--agent-open { display: block; }
+  .person-world-agent-panel { position: static; height: calc(100dvh - 90px); border: 0; }
+}
+
+.world-graph { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }.world-graph__canvas {
+  position: relative; overflow: hidden; height: 440px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md);
+}
+.world-graph__canvas canvas { display: block; }
+.world-graph__truncated {
+  position: absolute; right: 10px; bottom: 8px;
+  padding: 2px 8px; border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+}
+.world-graph__detail { background: var(--surface-raised); }
+
+/* 阅读区折叠行的统一外观:muted 文字 + 前置 chevron,展开时旋转。 */
+.profile-reading-content details > summary {
+  cursor: pointer; list-style: none; padding: 4px 0;
+  color: var(--muted); font-size: 13px; font-weight: 500;
+}
+.profile-reading-content details > summary::-webkit-details-marker { display: none; }
+.profile-reading-content details > summary::before {
+  content: '›'; display: inline-block; margin-right: 6px;
+  color: var(--faint); transition: transform 120ms ease;
+}
+.profile-reading-content details[open] > summary::before { transform: rotate(90deg); }
+.profile-reading-content details > summary:hover { color: var(--text); }
+@media (max-width: 48em) {
+  .world-graph__canvas { height: 320px; }
+}

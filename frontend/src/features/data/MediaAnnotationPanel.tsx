@@ -1,3 +1,4 @@
+import { userMessage } from '../../components/feedback/messages'
 import {
   Alert,
   Badge,
@@ -132,7 +133,7 @@ export function MediaAnnotationPanel({ projectId }: { projectId: string }) {
           <Badge color="green" variant="light">可复用 {counts.approved}</Badge>
         </Group>
       </Group>
-      {error ? <Alert color="red">{error}</Alert> : null}
+      {error ? <Alert color="red">{userMessage(error)}</Alert> : null}
       {items.length === 0 ? (
         <Alert color="gray">尚无语义标注。先运行本地媒体理解任务，系统不会直接猜测图片或录音内容。</Alert>
       ) : (

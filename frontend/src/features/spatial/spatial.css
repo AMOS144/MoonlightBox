@@ -1,0 +1,73 @@
+.spatial-page {
+  max-width: 1440px;
+  margin: 0 auto;
+}
+
+.spatial-controls {
+  background: rgb(25 23 22 / 92%);
+}
+
+.spatial-workspace {
+  display: grid;
+  min-height: 650px;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 18px;
+}
+
+.spatial-map-shell {
+  position: relative;
+  min-height: 650px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 45%, rgb(200 169 107 / 12%), transparent 24rem),
+    #12110f;
+}
+
+.spatial-map,
+.spatial-map-empty {
+  width: 100%;
+  height: 100%;
+  min-height: 650px;
+}
+
+.spatial-map-empty {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 32px;
+}
+
+.spatial-map-error {
+  position: absolute;
+  z-index: 20;
+  right: 18px;
+  bottom: 18px;
+  left: 18px;
+}
+
+.spatial-sidebar {
+  min-width: 0;
+}
+
+.spatial-place-card {
+  cursor: pointer;
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+
+.spatial-place-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+@media (max-width: 980px) {
+  .spatial-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .spatial-map-shell,
+.spatial-map,
+.spatial-map-empty {
+    min-height: 520px;
+  }
+}

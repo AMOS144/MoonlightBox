@@ -1,57 +1,37 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Alert, Badge, Button, Card, Container, Group, SimpleGrid, Skeleton, Stack, Text, Title } from '@mantine/core'
+import { Avatar, Button, Group, Skeleton, Stack, Text, TextInput } from '@mantine/core'
 import { Link } from 'react-router-dom'
-
 import { request } from '../../api/client'
 import { Icon } from '../../components/Icon'
+import { PageHeader } from '../../components/PageHeader'
+import { AsyncState } from '../../components/feedback/AsyncState'
+import type { Project } from './types'
+import './projects.css'
 
-export type Project = {
-  id: string
-  name: string
-  status: string
-  created_at: string
-  updated_at: string
-}
-
+/** 项目名用于区分资料；同一人物的多个项目不能看成重复的人物卡片。 */
 export function ProjectListPage() {
-  const projects = useQuery({
-    queryKey: ['projects'],
-    queryFn: () => request<Project[]>('/api/projects'),
-  })
-
-  return (
-    <Container component="main" py={{ base: 32, sm: 64 }} size="lg">
-      <Group align="flex-end" justify="space-between" mb={48}>
-        <div>
-          <Text c="moon.4" fw={700} size="xs" tt="uppercase">Moonlight Box</Text>
-          <Title mt={6} order={1}>月光宝盒</Title>
-          <Text c="dimmed" mt={8}>保存真实对话，也保存那些可以重新选择的时刻。</Text>
-        </div>
-        <Button component={Link} leftSection={<Icon name="plus" size={17} />} to="/projects/new">
-          创建项目
-        </Button>
+  const [filter, setFilter] = useState('')
+  const projects = useQuery({ queryKey: ['projects'], queryFn: () => request<Project[]>('/api/projects') })
+  const visible = projects.data?.filter(p => [p.name, p.target_name].join(' ').toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase())) ?? []
+  return <section className="project-library">
+    <PageHeader title="所有项目" action={<Button component={Link} leftSection={<Icon name="plus" size={16} />} to="/projects/new">创建项目</Button>} />
+    <AsyncState error={projects.error} retry={() => void projects.refetch()} />
+    {projects.isPending && <Stack mt="lg">{[0, 1, 2].map(i => <Skeleton key={i} h={88} radius="sm" />)}</Stack>}
+    {projects.data && <>
+      <Group className="library-toolbar" justify="space-between">
+        <Text size="xs" c="dimmed">{projects.data.length} 个项目</Text>
+        {projects.data.length > 6 && <TextInput aria-label="查找项目" placeholder="查找项目或人物" value={filter} onChange={e => setFilter(e.currentTarget.value)} />}
       </Group>
-
-      {projects.isPending && <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>{[0, 1, 2].map((item) => <Skeleton h={150} key={item} radius="md" />)}</SimpleGrid>}
-      {projects.isError && <Alert color="red" title="项目加载失败">请检查服务状态后重试。</Alert>}
-      {projects.data && projects.data.length === 0 && (
-        <Card padding="xl" withBorder>
-          <Stack align="center" gap="xs" py="xl">
-            <Title order={3}>还没有记忆档案</Title>
-            <Text c="dimmed">创建项目并导入一份 WxEcho 聊天记录。</Text>
-            <Button component={Link} mt="md" to="/projects/new">创建第一个项目</Button>
-          </Stack>
-        </Card>
-      )}
-      <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>
-        {projects.data?.map((project) => (
-          <Card component={Link} key={project.id} padding="lg" to={`/projects/${project.id}`} withBorder>
-            <Group justify="space-between"><Icon name="timeline" size={22} /><Badge color="gray" variant="light">{project.status}</Badge></Group>
-            <Title mt="xl" order={3}>{project.name}</Title>
-            <Text c="dimmed" mt={6} size="sm">更新于 {new Date(project.updated_at).toLocaleDateString('zh-CN')}</Text>
-          </Card>
-        ))}
-      </SimpleGrid>
-    </Container>
-  )
+      <div className="project-directory">
+        {visible.map(project => <Link className="project-directory-row" key={project.id} to={'/projects/' + project.id}>
+          <Avatar radius="xl" size={44} src={project.target_avatar_asset_id ? '/api/projects/' + project.id + '/media/' + project.target_avatar_asset_id : undefined} alt="">{(project.target_name ?? project.name).slice(0, 1)}</Avatar>
+          <div className="project-directory-name"><Text fw={500}>{project.name}</Text><Text size="xs" c="dimmed">{project.target_name && project.target_name !== project.name ? project.target_name : project.target_name ? '聊天资料' : '尚未确认人物'}</Text></div>
+          <Text className="project-directory-date" size="xs" c="dimmed">资料更新 {new Date(project.updated_at).toLocaleDateString('zh-CN')}</Text>
+          <Icon name="chevron" size={16} />
+        </Link>)}
+      </div>
+      {!visible.length && <div className="library-empty"><Text>{filter.trim() ? '没有找到匹配的项目' : '还没有项目'}</Text><Text size="sm" c="dimmed">{filter.trim() ? '试试其他名称。' : '从右上角创建项目，再导入聊天记录。'}</Text></div>}
+    </>}
+  </section>
 }

@@ -1,46 +1,49 @@
-import { createBrowserRouter } from 'react-router-dom'
+import { createBrowserRouter, Navigate } from 'react-router-dom'
 
-import { BranchChatPage } from '../features/branches/BranchChatPage'
-import { BranchCreatePage } from '../features/branches/BranchCreatePage'
-import { BranchListPage } from '../features/branches/BranchListPage'
-import { DataQualityPage } from '../features/data/DataQualityPage'
-import { EvaluationPage } from '../features/evaluation/EvaluationPage'
-import { NodeReviewPage } from '../features/events/NodeReviewPage'
-import { ModelsPage } from '../features/models/ModelsPage'
-import { ProjectCreatePage } from '../features/projects/ProjectCreatePage'
 import { ProjectLayout } from '../features/projects/ProjectLayout'
-import { ProjectListPage } from '../features/projects/ProjectListPage'
-import { ProjectOverviewPage } from '../features/projects/ProjectOverviewPage'
-import { SpatialHeatmapPage } from '../features/spatial/SpatialHeatmapPage'
-import { TimelinePage } from '../features/timeline/TimelinePage'
-import { TrainingProgressPage } from '../features/training/TrainingProgressPage'
-import { WorldProfilePage } from '../features/world/WorldProfilePage'
 import { AppShell } from './AppShell'
+import { RouteErrorPage } from '../components/feedback/RouteErrorPage'
 
 export const router = createBrowserRouter([
   {
     element: <AppShell />,
+    errorElement: <RouteErrorPage />,
     children: [
-      { path: '/', element: <ProjectListPage /> },
-      { path: '/projects/new', element: <ProjectCreatePage /> },
+      { element: <ProjectLayout />, children: [
+      { path: '/', lazy: async () => ({ Component: (await import('../features/projects/ProjectListPage')).ProjectListPage }) },
+      { path: '/settings', lazy: async () => ({ Component: (await import('../features/settings/SettingsPage')).SettingsPage }) },
+      ...(import.meta.env.DEV ? [{ path: '/dev/ui', lazy: async () => ({ Component: (await import('../features/dev/UIExamplesPage')).UIExamplesPage }) }] : []),
+      { path: '/projects/new', lazy: async () => ({ Component: (await import('../features/projects/ProjectCreatePage')).ProjectCreatePage }) },
       {
         path: '/projects/:projectId',
-        element: <ProjectLayout />,
         children: [
-          { index: true, element: <ProjectOverviewPage /> },
-          { path: 'data', element: <DataQualityPage /> },
-          { path: 'events', element: <NodeReviewPage /> },
-          { path: 'models', element: <ModelsPage /> },
-          { path: 'timeline', element: <TimelinePage /> },
-          { path: 'world', element: <WorldProfilePage /> },
-          { path: 'world/places', element: <SpatialHeatmapPage /> },
-          { path: 'training/:jobId', element: <TrainingProgressPage /> },
-          { path: 'branches', element: <BranchListPage /> },
-          { path: 'branches/new', element: <BranchCreatePage /> },
-          { path: 'branches/:branchId', element: <BranchChatPage /> },
-          { path: 'evaluation', element: <EvaluationPage /> },
+          { index: true, lazy: async () => ({ Component: (await import('../features/projects/ProjectOverviewPage')).ProjectOverviewPage }) },
+          { path: 'data', element: <Navigate to="../setup/import" replace /> },
+          { path: 'setup/import', lazy: async () => ({ Component: (await import('../features/data/DataQualityPage')).DataQualityPage }) },
+          { path: 'setup/participants', lazy: async () => ({ Component: (await import('../features/data/ParticipantsPage')).ParticipantsPage }) },
+          { path: 'setup/graph', lazy: async () => ({ Component: (await import('../features/world/WorldGraphPage')).WorldGraphPage }) },
+          { path: 'events', element: <Navigate to="../nodes" replace /> },
+          { path: 'nodes', lazy: async () => ({ Component: (await import('../features/nodes/NodeInvestigationPage')).NodeInvestigationPage }) },
+          { path: 'background', lazy: async () => ({ Component: (await import('../features/nodes/NodeBackgroundPage')).NodeBackgroundPage }) },
+          { path: 'node-profiles/:profileId', lazy: async () => ({ Component: (await import('../features/nodes/NodeProfilePage')).NodeProfilePage }) },
+          { path: 'events/legacy', lazy: async () => ({ Component: (await import('../features/events/LegacyEventsPage')).LegacyEventsPage }) },
+          { path: 'models', lazy: async () => ({ Component: (await import('../features/models/ModelsPage')).ModelsPage }) },
+          { path: 'timeline', element: <Navigate to="../nodes" replace /> },
+          { path: 'advanced', element: <Navigate to="/settings" replace /> },
+          { path: 'world', lazy: async () => ({ Component: (await import('../features/world/WorldProfilePage')).WorldProfilePage }) },
+          { path: 'world/places', lazy: async () => ({ Component: (await import('../features/spatial/SpatialHeatmapPage')).SpatialHeatmapPage }) },
+          { path: 'training/:jobId', lazy: async () => ({ Component: (await import('../features/training/TrainingProgressPage')).TrainingProgressPage }) },
+          { path: 'branches', lazy: async () => ({ Component: (await import('../features/branches/BranchListPage')).BranchListPage }) },
+          { path: 'branches/new', lazy: async () => ({ Component: (await import('../features/branches/BranchCreatePage')).BranchCreatePage }) },
+          { path: 'branches/:branchId', lazy: async () => ({ Component: (await import('../features/branches/BranchChatPage')).BranchChatPage }) },
+          {
+            path: 'branches/:branchId/preparing',
+            lazy: async () => ({ Component: (await import('../features/branches/BranchPreparationPage')).BranchPreparationPage }),
+          },
+          { path: 'evaluation', lazy: async () => ({ Component: (await import('../features/evaluation/EvaluationPage')).EvaluationPage }) },
         ],
       },
+      ] },
     ],
   },
 ])

@@ -1,0 +1,8 @@
+.node-workbench { display: grid; grid-template-columns: minmax(200px, .7fr) minmax(0, 2fr); gap: 24px; align-items: start; }
+.node-candidates, .node-detail { min-width: 0; max-height: 72vh; overflow-y: auto; overflow-anchor: none; scrollbar-gutter: stable; }
+.node-detail { padding: 0 8px; }
+/* 候选卡片复用全局 interactive-card;这里只补按钮重置和选中态。 */
+.node-candidate { width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.node-candidate--selected { border-color: var(--accent); background: var(--surface-raised); }
+@media (max-width: 1000px) { .node-workbench { grid-template-columns: 200px minmax(0, 1fr); } }
+@media (max-width: 650px) { .node-workbench { grid-template-columns: minmax(0, 1fr); } .node-candidates { max-height: 240px; } .node-detail { max-height: none; } }

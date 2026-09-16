@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Button, Group, NativeSelect, Paper, Progress, Stack, Stepper, Text, ThemeIcon, Title } from '@mantine/core'
+import { Alert, Button, Select, Paper, Stack, Text, Title, VisuallyHidden } from '@mantine/core'
 import { Link, useInRouterContext } from 'react-router-dom'
 
+import { useSessionState } from '../../hooks/useSessionState'
 import { Icon } from '../../components/Icon'
+import { SetupHeader } from '../../components/SetupHeader'
+import { mediaNotice, userMessage } from '../../components/feedback/messages'
 
 type Preview = {
   id: string
@@ -27,6 +30,9 @@ type Preview = {
 
 type ImportWizardProps = {
   projectId: string
+  stage?: 'import' | 'participants'
+  onSaved?: () => void
+  savedImports?: Array<{ id: string; preview_id: string; message_count: number }>
 }
 
 type ConfirmResult = {
@@ -37,76 +43,25 @@ type ConfirmResult = {
   world_job_id: string | null
 }
 
-type AnalysisJob = {
-  id: string
-  kind: string
-  status: 'queued' | 'running' | 'interrupted' | 'succeeded' | 'failed' | 'cancelled'
-  progress: number
-  checkpoint: {
-    stage?: string
-    event_count?: number
-    analysis_job_id?: string
-  } | null
-  error_code: string | null
-  error_message: string | null
-}
-
-const ANALYSIS_STAGE_LABELS: Record<string, string> = {
-  bundles_ready: '整理会话窗口',
-  indexing_world: '建立人物世界',
-  compiling_profile: '编译人物背景',
-  world_ready: '人物背景已建立',
-  loading_messages: '整理消息',
-  extracting_candidates: '提取候选',
-  reviewing_persistence: '复核持续性',
-  windows: '复核持续性',
-  ranking: '合并排名',
-  publishing: '发布节点',
-  events_created: '发布节点',
-  completed: '发布节点',
-}
-
-function analysisFailureMessage(errorCode: string | null): string {
-  if (errorCode?.startsWith('lightrag_') || errorCode?.startsWith('world_')) {
-    return '人物世界构建未完成，请检查 LightRAG Sidecar、抽取模型和嵌入模型配置后重试。'
-  }
-  const code = errorCode?.replace(/^node_analysis_/, '')
-  if (code === 'authentication' || code === 'missing_api_key' || code === 'disabled') {
-    return '节点分析服务尚未就绪，请配置节点分析 API 后重试。'
-  }
-  if (code === 'invalid_response') {
-    return '节点分析响应无效，请检查模型配置与兼容性后重试。'
-  }
-  if (code && ['rate_limit', 'server', 'network', 'timeout'].includes(code)) {
-    return '节点分析服务繁忙或受限，请重试分析。'
-  }
-  return '自动分析未完成，请重试；如持续失败，请检查节点分析配置。'
-}
-
-export function ImportWizard({ projectId }: ImportWizardProps) {
+export function ImportWizard({ projectId, stage = 'import', onSaved, savedImports = [] }: ImportWizardProps) {
   const inRouter = useInRouterContext()
+  const directoryInput = useRef<HTMLInputElement | null>(null)
   const [file, setFile] = useState<File | null>(null)
   const [mediaFiles, setMediaFiles] = useState<File[]>([])
   const [directoryName, setDirectoryName] = useState('')
-  const [preview, setPreview] = useState<Preview | null>(null)
+  const [preview, setPreview] = useSessionState<Preview | null>(`import-preview:${projectId}`, null)
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState('')
-  const [selfParticipant, setSelfParticipant] = useState('')
-  const [targetParticipant, setTargetParticipant] = useState('')
+  const [selfParticipant, setSelfParticipant] = useSessionState(`import-self:${projectId}`, '')
+  const [targetParticipant, setTargetParticipant] = useSessionState(`import-target:${projectId}`, '')
   const [submitting, setSubmitting] = useState(false)
-  const [confirmed, setConfirmed] = useState<ConfirmResult | null>(null)
+  const [savedConfirmation, setConfirmed] = useSessionState<ConfirmResult | null>(`import-confirmed:${projectId}:${preview?.id ?? 'none'}`, null)
+  // 预览与保存状态必须绑定同一批导入；后端记录也可恢复旧版本页面未缓存的确认。
+  const savedImport = savedImports.find(item => item.preview_id === preview?.id)
+  const confirmed = savedImport ?? savedConfirmation
   const [confirmError, setConfirmError] = useState('')
-  const [analysisJob, setAnalysisJob] = useState<AnalysisJob | null>(null)
-  const [followupJobId, setFollowupJobId] = useState<string | null>(null)
-  const [pollGeneration, setPollGeneration] = useState(0)
-  const [pollError, setPollError] = useState('')
-  const [pollStopped, setPollStopped] = useState(false)
-  const [retrying, setRetrying] = useState(false)
-  const [retryError, setRetryError] = useState('')
   const scanController = useRef<AbortController | null>(null)
   const confirmController = useRef<AbortController | null>(null)
-  const retryController = useRef<AbortController | null>(null)
-  const pollController = useRef<AbortController | null>(null)
   const scanRequestId = useRef(0)
   const flowGeneration = useRef(0)
 
@@ -115,115 +70,9 @@ export function ImportWizard({ projectId }: ImportWizardProps) {
       flowGeneration.current += 1
       scanController.current?.abort()
       confirmController.current?.abort()
-      retryController.current?.abort()
-      pollController.current?.abort()
     },
     [],
   )
-
-  useEffect(() => {
-    const jobId = followupJobId ?? confirmed?.world_job_id ?? confirmed?.analysis_job_id
-    if (!jobId) return
-    let cancelled = false
-    let timer: number | undefined
-    let activeController: AbortController | undefined
-    let failureCount = 0
-    const generation = flowGeneration.current
-    setPollError('')
-    setPollStopped(false)
-
-    async function poll() {
-      activeController = new AbortController()
-      pollController.current = activeController
-      try {
-        const response = await fetch(`/api/jobs/${jobId}`, {
-          signal: activeController.signal,
-        })
-        if (!response.ok && response.status < 500) {
-          if (!cancelled && generation === flowGeneration.current) {
-            setPollError('无法查询分析进度，请确认任务仍然存在后重新查询。')
-            setPollStopped(true)
-          }
-          return
-        }
-        if (!response.ok) throw new Error('查询分析进度失败')
-        const job = (await response.json()) as AnalysisJob
-        if (cancelled || generation !== flowGeneration.current) return
-        failureCount = 0
-        setPollError('')
-        setPollStopped(false)
-        setAnalysisJob(job)
-        if (job.status === 'queued' || job.status === 'running') {
-          timer = window.setTimeout(poll, 800)
-        } else if (
-          job.status === 'succeeded' &&
-          job.kind === 'lightrag_world_build_v1' &&
-          typeof job.checkpoint?.analysis_job_id === 'string'
-        ) {
-          setFollowupJobId(job.checkpoint.analysis_job_id)
-        }
-      } catch (error) {
-        if (
-          cancelled ||
-          generation !== flowGeneration.current ||
-          (error instanceof DOMException && error.name === 'AbortError')
-        ) {
-          return
-        }
-        failureCount += 1
-        if (failureCount > 3) {
-          setPollError('多次查询失败，请检查网络或服务状态后重新查询。')
-          setPollStopped(true)
-        } else {
-          setPollError('暂时无法获取分析进度，正在重试……')
-          timer = window.setTimeout(poll, 1500)
-        }
-      }
-    }
-
-    void poll()
-    return () => {
-      cancelled = true
-      activeController?.abort()
-      if (pollController.current === activeController) {
-        pollController.current = null
-      }
-      if (timer !== undefined) window.clearTimeout(timer)
-    }
-  }, [confirmed?.analysis_job_id, confirmed?.world_job_id, followupJobId, pollGeneration])
-
-  async function retryAnalysis() {
-    const jobId = followupJobId ?? confirmed?.world_job_id ?? confirmed?.analysis_job_id
-    if (!jobId || retrying) return
-    retryController.current?.abort()
-    const controller = new AbortController()
-    retryController.current = controller
-    const generation = flowGeneration.current
-    setRetrying(true)
-    setRetryError('')
-    try {
-      const response = await fetch(`/api/jobs/${jobId}/resume`, {
-        method: 'POST',
-        signal: controller.signal,
-      })
-      if (!response.ok) throw new Error('恢复分析失败')
-      const job = (await response.json()) as AnalysisJob
-      if (generation !== flowGeneration.current || controller.signal.aborted) return
-      setAnalysisJob(job)
-      setPollGeneration((generation) => generation + 1)
-    } catch (error) {
-      if (
-        generation === flowGeneration.current &&
-        !(error instanceof DOMException && error.name === 'AbortError')
-      ) {
-        setRetryError('重试请求失败，请稍后再试。')
-      }
-    } finally {
-      if (generation === flowGeneration.current) {
-        setRetrying(false)
-      }
-    }
-  }
 
   async function scan() {
     if (!file || scanning) return
@@ -300,6 +149,7 @@ export function ImportWizard({ projectId }: ImportWizardProps) {
       const result = (await response.json()) as ConfirmResult
       if (generation !== flowGeneration.current || controller.signal.aborted) return
       setConfirmed(result)
+      onSaved?.()
     } catch (error) {
       if (
         generation === flowGeneration.current &&
@@ -314,18 +164,29 @@ export function ImportWizard({ projectId }: ImportWizardProps) {
     }
   }
 
+  // 已打开的页面可能仍持有旧版预览缓存；同样排除系统发送者，不要求用户重新上传。
+  const personNames = (preview?.participants ?? []).filter(name => !['系统', 'system'].includes(name.trim().toLowerCase()))
+  function selectPerson(role: 'self' | 'target', value: string | null) {
+    if (submitting || !value || !personNames.includes(value)) return
+    const current = role === 'self' ? selfParticipant : targetParticipant
+    const other = role === 'self' ? targetParticipant : selfParticipant
+    const setCurrent = role === 'self' ? setSelfParticipant : setTargetParticipant
+    const setOther = role === 'self' ? setTargetParticipant : setSelfParticipant
+    setCurrent(value)
+    // 两人聊天自动配对；多人记录只在选择冲突时交换，不擅自猜测第三人的身份。
+    if (personNames.length === 2) setOther(personNames.find(name => name !== value)!)
+    else if (other === value) setOther(current !== value && personNames.includes(current) ? current : '')
+  }
   const canConfirm =
     preview !== null &&
-    preview.participants.includes(selfParticipant) &&
-    preview.participants.includes(targetParticipant) &&
+    personNames.includes(selfParticipant) &&
+    personNames.includes(targetParticipant) &&
     selfParticipant !== targetParticipant
 
   function selectExportDirectory(files: File[]) {
     flowGeneration.current += 1
     scanController.current?.abort()
     confirmController.current?.abort()
-    retryController.current?.abort()
-    pollController.current?.abort()
     scanRequestId.current += 1
     const chatFiles = files.filter((candidate) =>
       /^chat\.(csv|json|txt)$/i.test(candidate.name),
@@ -350,7 +211,6 @@ export function ImportWizard({ projectId }: ImportWizardProps) {
     )
     setScanning(false)
     setSubmitting(false)
-    setRetrying(false)
     setPreview(null)
     setScanError(
       files.length > 0 && selectedChat === null
@@ -359,187 +219,67 @@ export function ImportWizard({ projectId }: ImportWizardProps) {
     )
     setConfirmed(null)
     setConfirmError('')
-    setAnalysisJob(null)
-    setFollowupJobId(null)
-    setPollError('')
-    setRetryError('')
     setSelfParticipant('')
     setTargetParticipant('')
   }
 
   return (
-    <Stack gap="xl">
-      <div><Text c="moon.4" fw={700} size="xs">聊天数据</Text><Title mt={5} order={1}>导入真实聊天</Title><Text c="dimmed" mt={7}>选择完整的 WxEcho 导出目录，原始消息不会被清洗过程覆盖。</Text></div>
-      <Stepper active={!preview ? 0 : !confirmed ? 1 : analysisJob?.status !== 'succeeded' || analysisJob?.kind === 'lightrag_world_build_v1' ? 2 : 3} allowNextStepsSelect={false}>
-        <Stepper.Step label="选择记录" />
-        <Stepper.Step label="确认双方" />
-        <Stepper.Step label="整理回忆" />
-        <Stepper.Completed>导入与分析完成</Stepper.Completed>
-      </Stepper>
-      <Paper p="md" withBorder><Text fw={700}>请选择 WxEcho 导出目录</Text><Text c="dimmed" mt={4} size="sm">系统会自动识别聊天记录、图片、语音、表情和头像。聊天记录优先使用 chat.csv，其次是 chat.json 和 chat.txt。</Text></Paper>
-      <Paper component="label" htmlFor="export-directory" p="lg" style={{ cursor: 'pointer' }} withBorder>
-        <Group wrap="nowrap">
-        <ThemeIcon color="moon" size={44} variant="light"><Icon name="folder" size={24} /></ThemeIcon>
-        <div>
-          <Text fw={700}>{directoryName || '选择 WxEcho 导出目录'}</Text>
-          <Text c="dimmed" size="sm">
-            {file
-              ? `已识别 ${file.name} 和 ${mediaFiles.length} 个媒体文件`
-              : '点击选择包含聊天记录和媒体的完整文件夹'}
-          </Text>
-        </div>
-        <Button component="span" ml="auto" variant="default">选择目录</Button>
-        </Group>
-      </Paper>
-      <input
-        aria-label="WxEcho 导出目录"
-        className="directory-picker__input"
-        id="export-directory"
-        multiple
-        onChange={(event) => {
-          selectExportDirectory(Array.from(event.target.files ?? []))
-        }}
-        ref={(element) => element?.setAttribute('webkitdirectory', '')}
-        type="file"
-      />
-      <Button
-        disabled={!file || scanning}
-        loading={scanning}
-        onClick={scan}
-        type="button"
-      >
-        {scanning ? '正在扫描……' : '扫描并预览'}
-      </Button>
-      {scanError && <Alert color="red" role="alert">{scanError}</Alert>}
-
-      {preview && (
+    <Stack className="setup-page" gap="lg">
+      <SetupHeader step={stage === 'import' ? 1 : 2} title={stage === 'import' ? '导入记录' : '确认人物'}
+        description={stage === 'import' ? '选择 WxEcho 导出目录，先解析预览，确认人物后才正式保存。' : '确认聊天中的你和目标人物。两者不能选择同一个人。'} />
+      {stage === 'import' && <>
         <Paper p="lg" withBorder>
-          <Title order={3}>共 {preview.message_count} 条消息</Title>
-          {preview.media_file_count > 0 ? (
-            <p>
-              已读取 {preview.media_file_count} 个媒体文件，关联{' '}
-              {preview.linked_sticker_count} 个表情，
-              {preview.unlinked_sticker_count} 个表情待关联；去重后{' '}
-              {preview.deduplicated_asset_count ?? 0} 个资源。
-            </p>
-          ) : null}
-          {Object.entries(preview.avatar_status ?? {}).map(([name, linked]) => (
-            <p key={name}>
-              {name} 的头像：{linked ? '已关联' : '未找到强关联资源'}
-            </p>
-          ))}
-          {Object.entries(preview.failure_reasons ?? {})
-            .filter(([, count]) => count > 0)
-            .map(([reason, count]) => (
-              <p className="media-warning" key={reason}>
-                {reason}：{count}
-              </p>
-            ))}
-          <NativeSelect
-            aria-label="我"
-            id="self-participant"
-            label="我"
-            mt="md"
-            onChange={(event) => setSelfParticipant(event.target.value)}
-            value={selfParticipant}
-          >
-            <option value="">请选择</option>
-            {preview.participants.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </NativeSelect>
-          <NativeSelect
-            aria-label="复刻对象"
-            id="target-participant"
-            label="复刻对象"
-            mt="md"
-            onChange={(event) => setTargetParticipant(event.target.value)}
-            value={targetParticipant}
-          >
-            <option value="">请选择</option>
-            {preview.participants.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </NativeSelect>
-          <Button
-            disabled={!canConfirm || submitting || confirmed !== null}
-            loading={submitting}
-            mt="lg"
-            onClick={confirm}
-            type="button"
-          >
-            {confirmed ? '已完成导入' : submitting ? '正在导入……' : '确认导入'}
-          </Button>
-          {confirmed && (
-                  <>
-                    <Alert color="green" mt="md" role="status">
-                      导入完成，已保存 {confirmed.message_count} 条消息。
-                    </Alert>
-                    {!analysisJob && (confirmed.world_job_id || confirmed.analysis_job_id) && <p>正在启动自动分析……</p>}
-                    {analysisJob?.status === 'queued' && <p role="status">等待分析任务开始……</p>}
-                    {analysisJob?.status === 'running' && (
-                      <div role="status">
-                        <Text mt="md">
-                        {ANALYSIS_STAGE_LABELS[analysisJob.checkpoint?.stage ?? ''] ??
-                          '分析关键节点'}
-                        ……{Math.round(analysisJob.progress * 100)}%
-                        </Text><Progress mt="xs" value={analysisJob.progress * 100} />
-                      </div>
-                    )}
-                    {pollError && (
-                      <p role={pollStopped ? 'alert' : 'status'}>{pollError}</p>
-                    )}
-                    {pollStopped && (
-                      <button
-                        onClick={() => setPollGeneration((generation) => generation + 1)}
-                        type="button"
-                      >
-                        重新查询
-                      </button>
-                    )}
-                    {analysisJob?.status === 'succeeded' && analysisJob.kind === 'lightrag_world_build_v1' && (
-                      <p role="status">人物背景已经建立，正在启动关键节点分析……</p>
-                    )}
-                    {analysisJob?.status === 'succeeded' && analysisJob.kind !== 'lightrag_world_build_v1' && (
-                      <div className="analysis-success">
-                        <p role="status">
-                          分析完成，生成 {analysisJob.checkpoint?.event_count ?? 0} 个关键节点。
-                        </p>
-                        {inRouter ? (
-                          <Link className="primary-button" to={`/projects/${projectId}/events`}>
-                            查看关键节点
-                          </Link>
-                        ) : (
-                          <a className="primary-button" href={`/projects/${projectId}/events`}>
-                            查看关键节点
-                          </a>
-                        )}
-                      </div>
-                    )}
-                    {analysisJob?.status === 'cancelled' && <p role="status">分析已取消。</p>}
-                    {(analysisJob?.status === 'failed' ||
-                      analysisJob?.status === 'interrupted') && (
-                      <div>
-                        <p role="alert">{analysisFailureMessage(analysisJob.error_code)}</p>
-                        <button
-                          disabled={retrying}
-                          onClick={retryAnalysis}
-                          type="button"
-                        >
-                          {retrying ? '正在重试……' : '重试分析'}
-                        </button>
-                        {retryError && <p role="alert">{retryError}</p>}
-                      </div>
-                    )}
-                  </>
-          )}
-          {confirmError && <Alert color="red" role="alert">{confirmError}</Alert>}
+          <div className="setup-source">
+            <Icon name="folder" size={24} />
+            <div className="setup-source-copy">
+              <Text fw={500}>{directoryName || (preview ? '已恢复解析预览' : '聊天记录目录')}</Text>
+              <Text size="xs" c="dimmed">{file ? file.name + ' · ' + mediaFiles.length + ' 个媒体文件' : '支持 chat.csv、chat.json、chat.txt 及随附媒体'}</Text>
+            </div>
+            <Button variant="default" size="sm" disabled={scanning} onClick={() => directoryInput.current?.click()}>{preview ? '更换目录' : '选择目录'}</Button>
+          </div>
         </Paper>
-      )}
+        <VisuallyHidden><input aria-label="WxEcho 导出目录" id="export-directory" multiple tabIndex={-1}
+          onChange={event => selectExportDirectory(Array.from(event.target.files ?? []))}
+          ref={element => { directoryInput.current = element; element?.setAttribute('webkitdirectory', '') }} type="file" /></VisuallyHidden>
+      </>}
+      {scanError && <Alert color="red" role="alert">{scanError}</Alert>}
+      {stage === 'import' && !preview && <div className="setup-actions"><Button size="sm" disabled={!file || scanning} loading={scanning} onClick={scan} type="button">{scanning ? '正在扫描……' : '扫描并预览'}</Button></div>}
+      {!preview && stage === 'participants' && <Alert>请先解析聊天记录，再确认双方身份。{inRouter && <div className="setup-actions"><Button component={Link} to={'/projects/' + projectId + '/setup/import'} variant="light">去导入记录</Button></div>}</Alert>}
+      {preview && <>
+        <section>
+          <Title order={3}>{preview.message_count.toLocaleString('zh-CN')} 条消息{confirmed ? ' · 已保存' : ' · 已解析，尚未保存'}</Title>
+          <div className="setup-summary">
+            {preview.time_range && <Text size="sm" c="dimmed">{preview.time_range.map(t => new Date(t).toLocaleString('zh-CN')).join(' — ')}</Text>}
+            <Text size="sm" c="dimmed">{personNames.join('、')}</Text>
+            {preview.media_file_count > 0 && <Text size="sm" c="dimmed">{preview.media_file_count} 个媒体文件</Text>}
+          </div>
+          {Object.entries(preview.avatar_status ?? {}).filter(([, linked]) => !linked).map(([name]) => <Text key={name} size="sm" c="dimmed" mt="sm">{name}：未找到关联头像，不影响导入。</Text>)}
+          {Object.entries(preview.failure_reasons ?? {}).filter(([, count]) => count > 0).map(([reason, count]) => <Alert color="moon" role="status" mt="sm" key={reason}>{mediaNotice(reason, count)}</Alert>)}
+          {preview.errors?.length > 0 && <Alert color="orange" mt="sm">有 {preview.errors.length} 条记录需要检查。<details><summary>查看记录位置</summary>{preview.errors.map((e, i) => <Text key={i} size="sm">第 {e.line} 行：{userMessage(e.message)}</Text>)}</details></Alert>}
+          {preview.media_file_count > 0 && <details><summary>媒体解析详情</summary><Text size="sm" c="dimmed">已关联 {preview.linked_sticker_count} 个表情，{preview.unlinked_sticker_count} 个待关联；去重后 {preview.deduplicated_asset_count ?? 0} 个资源。</Text></details>}
+        </section>
+        {(stage === 'participants' || !inRouter) && !confirmed && <div className="setup-people">
+          <Select aria-label="我" id="self-participant" label="我" description="记录中由你发送的消息"
+            placeholder="选择你的名字" value={personNames.includes(selfParticipant) ? selfParticipant : null}
+            onChange={value => selectPerson('self', value)} disabled={submitting} allowDeselect={false}
+            data={personNames} />
+          <Select aria-label="目标人物" id="target-participant" label="目标人物" description="你想继续与谁聊天"
+            placeholder="选择对方的名字" value={personNames.includes(targetParticipant) ? targetParticipant : null}
+            onChange={value => selectPerson('target', value)} disabled={submitting} allowDeselect={false}
+            data={personNames} />
+          {selfParticipant && selfParticipant === targetParticipant && <Text size="sm" c="red">你和目标人物不能是同一个参与者。</Text>}
+        </div>}
+        {confirmError && <Alert color="red" role="alert">{confirmError}</Alert>}
+        {!confirmed && <div className="setup-actions">
+          {stage === 'import' && inRouter
+            ? <Button size="sm" component={Link} to={'/projects/' + projectId + '/setup/participants'}>记录已解析，确认人物与资料</Button>
+            : <Button size="sm" disabled={!canConfirm || submitting} loading={submitting} onClick={confirm} type="button">{submitting ? '正在导入……' : '确认人物并导入'}</Button>}
+        </div>}
+        {confirmed && <>
+          <Alert color="green" role="status">导入完成，已保存 {confirmed.message_count} 条消息。后台会继续整理人物背景，现有分支不受影响。</Alert>
+          {inRouter && <div className="setup-actions"><Button size="sm" component={Link} to={'/projects/' + projectId + '/world'}>查看人物背景整理状态</Button></div>}
+        </>}
+      </>}
     </Stack>
   )
 }
