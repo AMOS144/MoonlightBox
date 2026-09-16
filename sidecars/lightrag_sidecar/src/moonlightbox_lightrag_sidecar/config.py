@@ -41,6 +41,7 @@ class SidecarSettings(BaseSettings):
     chunk_overlap_token_size: int = Field(default=100, ge=0)
     max_parallel_insert: int = Field(default=3, ge=1, le=10)
     max_async_llm: int = Field(default=4, ge=1, le=32)
+    index_lease_ttl_seconds: int = Field(default=120, ge=30, le=86400)
 
     @field_validator("llm_base_url", "embedding_base_url")
     @classmethod
