@@ -1,0 +1,457 @@
+{
+  "graph_id": "1400178b-8e4a-468d-afd1-8e7c12d7aeec",
+  "chunks": 380,
+  "mapping": {
+    "old_mapping_zero_full_lines": 4,
+    "raw_render_mismatch_chunks": 376,
+    "exact_offset_chunks": 200,
+    "chunks_with_partial_message": 192,
+    "old_full_line_mapping_misses_messages": 181,
+    "bundle_render_mismatch": 154,
+    "unresolved_or_ambiguous_chunk": 26
+  },
+  "asset_sha256_unchanged": {
+    "kv_store_text_chunks.json": "0d4dd277dbc2380a60e94e706fd3c717da49d0d94b75966f1081ad32964f79b7",
+    "graph_chunk_entity_relation.graphml": "9af4656eb41d58914f082e29438bc0af1098d5f645e93f842646a6de1d5176ca",
+    "vdb_chunks.json": "b7f76eb354fdb73eb4f509e3a646c04b192387995b1079e2b72b8d539c423824",
+    "vdb_entities.json": "d14d52034cd8b95d0a624f96d7f611a77ae16fade0290ce1fbebf88b80eec1c7",
+    "vdb_relationships.json": "1814c63c47855fbbbc3676efa13b99b24a9a3d4d0dfacc69eae371267c0ac3a4"
+  },
+  "partial_examples": [
+    {
+      "chunk_id": "bundle_15c007706a6c89bf38e1102fefa3bcc3-chunk-000",
+      "message_count": 43,
+      "old_full_line_count": 41
+    },
+    {
+      "chunk_id": "bundle_15c007706a6c89bf38e1102fefa3bcc3-chunk-001",
+      "message_count": 44,
+      "old_full_line_count": 41
+    },
+    {
+      "chunk_id": "bundle_15c007706a6c89bf38e1102fefa3bcc3-chunk-002",
+      "message_count": 32,
+      "old_full_line_count": 29
+    },
+    {
+      "chunk_id": "bundle_2c76cb4b60cd3b8ea91e41612d600dcc-chunk-000",
+      "message_count": 45,
+      "old_full_line_count": 46
+    },
+    {
+      "chunk_id": "bundle_2c76cb4b60cd3b8ea91e41612d600dcc-chunk-001",
+      "message_count": 42,
+      "old_full_line_count": 38
+    }
+  ],
+  "cutoff": "2026-04-30 09:58:08.000000",
+  "eligible": {
+    "before": 100,
+    "after": 99
+  },
+  "mix_replays": [
+    {
+      "seed_index": 0,
+      "period": "all",
+      "pick_method": "WEIGHT",
+      "vector_reads": 0,
+      "eligible_nodes_with_out_of_scope_original_sources": 0,
+      "candidate_counts": [
+        [
+          704
+        ],
+        [
+          780
+        ],
+        [
+          380
+        ]
+      ],
+      "returned_chunks": 12,
+      "outside_range": 0,
+      "entities": 12,
+      "relationships": 253
+    },
+    {
+      "seed_index": 0,
+      "period": "before",
+      "pick_method": "WEIGHT",
+      "vector_reads": 0,
+      "eligible_nodes_with_out_of_scope_original_sources": 160,
+      "candidate_counts": [
+        [
+          290
+        ],
+        [
+          285
+        ],
+        [
+          100
+        ]
+      ],
+      "returned_chunks": 12,
+      "outside_range": 0,
+      "entities": 13,
+      "relationships": 171
+    },
+    {
+      "seed_index": 0,
+      "period": "after",
+      "pick_method": "WEIGHT",
+      "vector_reads": 0,
+      "eligible_nodes_with_out_of_scope_original_sources": 148,
+      "candidate_counts": [
+        [
+          264
+        ],
+        [
+          246
+        ],
+        [
+          99
+        ]
+      ],
+      "returned_chunks": 12,
+      "outside_range": 0,
+      "entities": 14,
+      "relationships": 228
+    },
+    {
+      "seed_index": 0,
+      "period": "all",
+      "pick_method": "VECTOR",
+      "vector_reads": 2,
+      "eligible_nodes_with_out_of_scope_original_sources": 0,
+      "candidate_counts": [
+        [
+          704
+        ],
+        [
+          780
+        ],
+        [
+          380
+        ]
+      ],
+      "returned_chunks": 12,
+      "outside_range": 0,
+      "entities": 12,
+      "relationships": 253
+    },
+    {
+      "seed_index": 0,
+      "period": "before",
+      "pick_method": "VECTOR",
+      "vector_reads": 2,
+      "eligible_nodes_with_out_of_scope_original_sources": 160,
+      "candidate_counts": [
+        [
+          290
+        ],
+        [
+          285
+        ],
+        [
+          100
+        ]
+      ],
+      "returned_chunks": 12,
+      "outside_range": 0,
+      "entities": 13,
+      "relationships": 171
+    },
+    {
+      "seed_index": 0,
+      "period": "after",
+      "pick_method": "VECTOR",
+      "vector_reads": 2,
+      "eligible_nodes_with_out_of_scope_original_sources": 148,
+      "candidate_counts": [
+        [
+          264
+        ],
+        [
+          246
+        ],
+        [
+          99
+        ]
+      ],
+      "returned_chunks": 12,
+      "outside_range": 0,
+      "entities": 14,
+      "relationships": 228
+    },
+    {
+      "seed_index": 190,
+      "period": "all",
+      "pick_method": "WEIGHT",
+      "vector_reads": 0,
+      "eligible_nodes_with_out_of_scope_original_sources": 0,
+      "candidate_counts": [
+        [
+          704
+        ],
+        [
+          780
+        ],
+        [
+          380
+        ]
+      ],
+      "returned_chunks": 12,
+      "outside_range": 0,
+      "entities": 13,
+      "relationships": 27
+    },
+    {
+      "seed_index": 190,
+      "period": "before",
+      "pick_method": "WEIGHT",
+      "vector_reads": 0,
+      "eligible_nodes_with_out_of_scope_original_sources": 160,
+      "candidate_counts": [
+        [
+          290
+        ],
+        [
+          285
+        ],
+        [
+          100
+        ]
+      ],
+      "returned_chunks": 12,
+      "outside_range": 0,
+      "entities": 11,
+      "relationships": 22
+    },
+    {
+      "seed_index": 190,
+      "period": "after",
+      "pick_method": "WEIGHT",
+      "vector_reads": 0,
+      "eligible_nodes_with_out_of_scope_original_sources": 148,
+      "candidate_counts": [
+        [
+          264
+        ],
+        [
+          246
+        ],
+        [
+          99
+        ]
+      ],
+      "returned_chunks": 12,
+      "outside_range": 0,
+      "entities": 11,
+      "relationships": 11
+    },
+    {
+      "seed_index": 190,
+      "period": "all",
+      "pick_method": "VECTOR",
+      "vector_reads": 2,
+      "eligible_nodes_with_out_of_scope_original_sources": 0,
+      "candidate_counts": [
+        [
+          704
+        ],
+        [
+          780
+        ],
+        [
+          380
+        ]
+      ],
+      "returned_chunks": 12,
+      "outside_range": 0,
+      "entities": 13,
+      "relationships": 27
+    },
+    {
+      "seed_index": 190,
+      "period": "before",
+      "pick_method": "VECTOR",
+      "vector_reads": 2,
+      "eligible_nodes_with_out_of_scope_original_sources": 160,
+      "candidate_counts": [
+        [
+          290
+        ],
+        [
+          285
+        ],
+        [
+          100
+        ]
+      ],
+      "returned_chunks": 12,
+      "outside_range": 0,
+      "entities": 11,
+      "relationships": 22
+    },
+    {
+      "seed_index": 190,
+      "period": "after",
+      "pick_method": "VECTOR",
+      "vector_reads": 1,
+      "eligible_nodes_with_out_of_scope_original_sources": 148,
+      "candidate_counts": [
+        [
+          264
+        ],
+        [
+          246
+        ],
+        [
+          99
+        ]
+      ],
+      "returned_chunks": 12,
+      "outside_range": 0,
+      "entities": 11,
+      "relationships": 11
+    },
+    {
+      "seed_index": 379,
+      "period": "all",
+      "pick_method": "WEIGHT",
+      "vector_reads": 0,
+      "eligible_nodes_with_out_of_scope_original_sources": 0,
+      "candidate_counts": [
+        [
+          704
+        ],
+        [
+          780
+        ],
+        [
+          380
+        ]
+      ],
+      "returned_chunks": 12,
+      "outside_range": 0,
+      "entities": 13,
+      "relationships": 273
+    },
+    {
+      "seed_index": 379,
+      "period": "before",
+      "pick_method": "WEIGHT",
+      "vector_reads": 0,
+      "eligible_nodes_with_out_of_scope_original_sources": 160,
+      "candidate_counts": [
+        [
+          290
+        ],
+        [
+          285
+        ],
+        [
+          100
+        ]
+      ],
+      "returned_chunks": 12,
+      "outside_range": 0,
+      "entities": 11,
+      "relationships": 242
+    },
+    {
+      "seed_index": 379,
+      "period": "after",
+      "pick_method": "WEIGHT",
+      "vector_reads": 0,
+      "eligible_nodes_with_out_of_scope_original_sources": 148,
+      "candidate_counts": [
+        [
+          264
+        ],
+        [
+          246
+        ],
+        [
+          99
+        ]
+      ],
+      "returned_chunks": 12,
+      "outside_range": 0,
+      "entities": 12,
+      "relationships": 223
+    },
+    {
+      "seed_index": 379,
+      "period": "all",
+      "pick_method": "VECTOR",
+      "vector_reads": 2,
+      "eligible_nodes_with_out_of_scope_original_sources": 0,
+      "candidate_counts": [
+        [
+          704
+        ],
+        [
+          780
+        ],
+        [
+          380
+        ]
+      ],
+      "returned_chunks": 12,
+      "outside_range": 0,
+      "entities": 13,
+      "relationships": 273
+    },
+    {
+      "seed_index": 379,
+      "period": "before",
+      "pick_method": "VECTOR",
+      "vector_reads": 2,
+      "eligible_nodes_with_out_of_scope_original_sources": 160,
+      "candidate_counts": [
+        [
+          290
+        ],
+        [
+          285
+        ],
+        [
+          100
+        ]
+      ],
+      "returned_chunks": 12,
+      "outside_range": 0,
+      "entities": 11,
+      "relationships": 242
+    },
+    {
+      "seed_index": 379,
+      "period": "after",
+      "pick_method": "VECTOR",
+      "vector_reads": 2,
+      "eligible_nodes_with_out_of_scope_original_sources": 148,
+      "candidate_counts": [
+        [
+          264
+        ],
+        [
+          246
+        ],
+        [
+          99
+        ]
+      ],
+      "returned_chunks": 12,
+      "outside_range": 0,
+      "entities": 12,
+      "relationships": 223
+    }
+  ],
+  "limitations": [
+    "没有调用自然语言embedding或关键词模型，使用真实已存向量回放",
+    "保留图的全局描述以观察现有上下文构建，不保证描述无未来信息",
+    "跨界chunk排除，尚未实现裁剪重嵌入",
+    "未测试aquery缓存和HTTP接线"
+  ],
+  "real_asset_writes": 0
+}

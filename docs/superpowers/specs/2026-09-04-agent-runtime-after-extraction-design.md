@@ -1,5 +1,12 @@
 # 数据提取完成后的数字人 Agent Runtime 设计
 
+> 2026-09-12 架构更新：Director 与 DayPlan 采用同级 Agent + LangGraph 共享协商 State。
+> 本文旧图中的 RoutineResolver、LoRA 表达路径及 Director 中心式编排不再代表当前目标。
+> 运行期协作以 [同级 Agent 共享 State 设计](2026-09-12-runtime-peer-agents-shared-state-design.md)
+> 为准；提取阶段和其他未覆盖边界仍保留本文作为历史设计参考。
+> 职责补正：Director 直接依据预加载的三天共享计划判断安排与冲突；只有需要修改计划时
+> 才向 DayPlan 发明确调整请求。三天本版默认为虚拟日期的昨天、今天、明天，替代旧版三块摘要。
+
 ## 1. 文档定位
 
 本文件的实现主体是**人物背景已经提取完成之后**，数字人如何在一条分支时间线上持续生活，以及如何在需要时与用户交流。
@@ -140,7 +147,7 @@ flowchart LR
   PWP -. 只读背景 .-> ASSEMBLE
   ORIGIN -. 只读快照 .-> ASSEMBLE
   CLOCK -. 当前时间 .-> ASSEMBLE
-  PLAN -. 当前块和后两个块 .-> ASSEMBLE
+  PLAN -. 三天共享计划完整生活块 .-> ASSEMBLE
   LS -. 当前运行状态 .-> ASSEMBLE
   STATE -. 当前有效记忆 .-> ASSEMBLE
 
@@ -316,7 +323,7 @@ sequenceDiagram
     T-->>D: ToolResult(source_ids, as_of, data)
   end
   D-->>E: LifeDecision JSON
-  E->>E: validate：校验 action、state_patch、plan_patch、时间和权限
+  E->>E: validate：校验 action、state_patch、plan_request、时间和权限
   alt action = speak
     E->>A: communication_intent + content_points + 当前表达上下文
     A-->>E: 最终消息/气泡
@@ -566,7 +573,7 @@ StatePatch:
 如果本轮只有用户消息而没有明确的状态变化，Executor 仍可以记录消息，但不创建新的
 `LifeStateVersion`；如果跨过了计划边界，则必须创建版本，即使 Director 最终选择 `wait`。
 
-Director 可以提出的 `state_patch` 仅限当前状态字段，例如把 `availability` 改为 `busy`、关闭一个 `open_conversation_thread` 或更新 `attention`。它不能修改 `virtual_now`、历史背景、已发生的 LifeEvent、其他分支或字段来源。`activity` 变更如果跨越当前计划块，必须同时提供一个局部 `plan_patch` 或明确引用已经存在的分支事件。
+Director 可以提出的 `state_patch` 仅限当前状态字段，例如把 `availability` 改为 `busy`、关闭一个 `open_conversation_thread` 或更新 `attention`。它不能修改 `virtual_now`、历史背景、已发生的 LifeEvent、其他分支或字段来源。`activity` 变更如果跨越当前计划块，必须同时提供 `PlanRevisionRequest` 或明确引用已经存在的分支事件；DayPlanAgent 会独立给出可审计的计划提案。
 
 ### 5.4 有效期和恢复规则
 
@@ -629,6 +636,36 @@ DayPlan:
 4. 少量变化，用于避免机械重复。
 
 临时事件可以覆盖某个生活块，但只影响相关时间段，不重写整天，也不凭空创造重大人生变化。
+
+### 6.1 DayPlanAgent：规划与执行分离
+
+DayPlan 是一个独立的 LangGraph Agent 工作流，而不是 Director 在 `LifeDecision`
+中直接修改某个 block。它使用与 Director 相同的认知模型配置，但拥有独立的
+system prompt、只读工具集合和 `DayPlanProposal` 输出契约：
+
+```text
+新分支 / 新日期 / Director 的 PlanRevisionRequest
+  → PlanContextAssembler
+  → DayPlanAgent（受限只读工具循环）
+  → DayPlanProposal
+  → Executor.validate_day_plan_proposal / commit_day_plan_proposal
+  → 已确认 DayPlan
+```
+
+`Director` 只能输出 `PlanRevisionRequest`（原因、目标日期、受影响范围和已有
+来源），不能输出 `plan_patch` 或数据库 ID。`Executor` 仍是唯一写入者：它校验
+全天连续覆盖、最小 30 分钟粒度、证据归属、已开始 block 不可重写，并重新安排
+下一条计划边界 Wakeup。Bootstrap 只建立没有生活块的 `pending` 槽位，不得注入
+睡眠、通勤、工作等确定性模板。Planner 失败、工具无结果或提案被拒绝时，计划标记为
+`unavailable`，当前状态保持 `unknown`；它会在下一条真实分支事件中重试，绝不提交
+半成品或伪造的固定日程。
+
+Planner 的 `PlanContext` 与聊天的 `ContextPacket` 分开。它只包含目标日期、时区、
+已确认承诺/已执行 block、冻结 Snapshot 中的工作/地点/规律投影、日期特征和本次
+修订请求；不包含整段近期聊天或表达风格。`OriginWorldSnapshot` 是带 `snapshot_id`
+和 `cutoff_at` 的只读资料区，不能拼进 system prompt。工具只返回带 `source_ids`
+的聚合结果：计划约束、由代码正则和时间戳分析的规律、Snapshot/Branch 记忆，以及
+可回溯到 Snapshot 来源的 LightRAG 语义证据。
 
 ## 7. EventQueue 与 Wakeup：让 Runtime 按事件运行
 
@@ -768,7 +805,7 @@ RuntimeContext:
 ```yaml
 LifeDecision:
   state_patch: object
-  plan_patch: object | null
+  plan_request: object | null
   action: speak | wait | continue_life | schedule
   speech_mode: reply | proactive | delayed_reply | null
   communication_intent: string | null
@@ -827,10 +864,11 @@ ContextPacket:
     routine_profile: object
   current:
     life_state: object
-    day_plan:
-      date: date
-      current_block: object | null
-      next_blocks: [object]
+    day_plans: # 虚拟日期 D-1、D、D+1；双方共享同一版本
+      - date: date
+        status: available | missing | unavailable
+        version: string | null
+        blocks: [object] # 当天完整已提交生活块；缺失不等于空闲
     open_commitments: [object]
     open_conversation_threads: [object]
   branch:
@@ -856,14 +894,14 @@ ContextPacket:
 | --- | --- | ---: | --- |
 | `trigger` | 本轮唤醒原因和用户最新消息 | 1,500 tokens | 最高，原文保留 |
 | `current.life_state` | 当前活动、可用性、情绪、目标、话题 | 1,200 tokens | 分支当前事实 |
-| `current.day_plan` | 当前生活块和后面两个生活块 | 1,000 tokens | 已确认计划高于惯例 |
+| `current.day_plans` | 昨天、今天、明天的完整已提交计划、日期状态及版本 | 按实际完整内容计入预算，不以旧 1,000 tokens 截断 | 已确认计划高于惯例；昨天只读 |
 | `current.open_commitments` | 未完成承诺及到期时间 | 1,000 tokens | 分支事实 |
 | `origin` | 身份、关系、规律、事件和别名 | 3,500 tokens | 提取背景，只读 |
 | `branch.working_window` | 当前触发附近的连续对话和未解决事项 | 4,000 tokens | 当前分支事实最高 |
 | `branch.recent_events` | 附近时间片之外但仍与当前周期相邻的事件 | 1,000 tokens | 分支事实高于历史背景 |
 | `memory` | `search_memory` 返回的历史/分支记忆证据 | 4,000 tokens | 必须带 scope 和来源 |
 
-`PersonWorldProfile` 不应每轮原样塞入。代码先保留身份、稳定关系、工作/地点、规律和与当前触发相关的事件；完整档案只在工具查询或调试中读取。`DayPlan` 只放当前块和接下来两个块，整天的其他块通过 `date` 和摘要表达。`LifeState` 放完整的当前字段，但 `open_conversation_threads` 和 `commitments` 只放未关闭项。`BranchOverlay` 先由代码展开为已确认的事件、承诺和计划覆盖；没有被 Executor 保存的 Director 建议不能进入这里。
+`PersonWorldProfile` 不应每轮原样塞入。代码先保留身份、稳定关系、工作/地点、规律和与当前触发相关的事件；完整档案只在工具查询或调试中读取。`DayPlan` 预加载虚拟日期昨天、今天、明天的完整已提交生活块及版本，双方共享；当前块可额外标注，但不能代替三天计划。缺失日期显式标记，不编造历史、不解释为全天空闲。`LifeState` 放完整的当前字段，但 `open_conversation_threads` 和 `commitments` 只放未关闭项。`BranchOverlay` 先由代码展开为已确认的事件、承诺和计划覆盖；没有被 Executor 保存的 Director 建议不能进入这里。
 
 `branch.working_window` 是本轮的第一层上下文，也叫“工作上下文”，不是长期记忆：它由代码根据当前触发消息向前取固定条数/固定时间片的 `BranchMessage`，并带上同一开放话题的必要消息。原始内容的唯一存储位置是 `BranchMessage`；`working_window` 可以每轮重新计算或放在缓存中，不能写进 `LifeStateVersion`。`LifeStateVersion` 只保存 `active_thread_ids`、最后观察到的 sequence 等引用字段。
 
@@ -969,8 +1007,8 @@ PersonWorldProfile > LightRAG 历史证据 > 一般常识。不能把推断写�
 - action=wait：没有足够理由外显行动。
 - action=continue_life：只更新当前生活状态，不发送消息。
 - action=schedule：有明确的承诺、计划边界或延迟回复理由时安排 Wakeup。
-- state_patch 只能修改 LifeState 允许的字段；plan_patch 只能覆盖局部
-  DayPlan，不得重写整天。
+- state_patch 只能修改 LifeState 允许的字段；plan_request 只能请求
+  DayPlanAgent 重新规划，不得携带 block、数据库 ID 或直接覆盖 DayPlan。
 - next_wakeup_at 必须晚于 virtual_now，并且必须有对应 reason；没有理由时为空。
 - private_reason 供审计，不得包含新的事实断言。
 
@@ -1031,7 +1069,12 @@ user message 只包含一个 `<runtime_context>` JSON 区块和一个 `<tool_res
 
 ### 9.4 Director 的工具边界
 
-Director 只绑定读取工具。工具不接受任意 SQL、不返回数据库对象，也不产生写入副作用。当前状态、当前 DayPlan、未完成承诺和最近对话已经由 `ContextAssembler` 预加载，因此不再把它们重复做成工具；工具只用于“当前上下文确实不足时的定向查询”。
+Director 只绑定读取工具。工具不接受任意 SQL、不返回数据库对象，也不产生写入副作用。当前状态、三天共享 DayPlan、未完成承诺和最近对话已经由 `ContextAssembler` 预加载，因此不再把它们重复做成工具；工具只用于“当前上下文确实不足时的定向查询”。
+
+Director 直接根据共享计划判断有无空闲、安排冲突以及如何回应；用户意图不清楚时直接询问用户。
+这些判断不需要请求 DayPlan。只有决定新增、移动、取消或重排活动时，才通过共享协商消息
+向同级 DayPlan 发送明确修改目标与保留约束。DayPlan 负责排程落地，发现新增约束时反馈，
+Executor 校验提交；Director 根据真实回执表达结果，不能把候选安排说成已经生效。
 
 运行时只保留两种只读能力；Director 绑定 `search_memory`，PersonaActor 绑定 `get_style_examples`：
 
@@ -1132,11 +1175,12 @@ graph.add_edge("tool_node", "director_model")
 def should_continue(state: DirectorLoopState) -> Literal["tool", "final", "force_final"]:
     if state.last_model_output_is_valid_decision:
         return "final"
-    if state.model_steps >= 12 or state.tool_calls >= 24:
+    # 以下是事故熔断器，不是 Agent 的计划或成功条件。
+    if state.model_steps >= 24 or state.tool_calls >= 48:
         return "force_final"
-    if state.tool_tokens >= 8000 or state.elapsed_seconds >= 20:
+    if state.tool_tokens >= 16000 or state.elapsed_seconds >= 300:
         return "force_final"
-    if state.repeated_call_count >= 2 or state.compaction_attempts >= 2:
+    if state.repeated_call_count >= 2 or state.tool_error_count >= 3:
         return "force_final"
     if state.model_requested_tool:
         return "tool"
@@ -1156,16 +1200,15 @@ director_context:
   input_soft_limit: 16000       # 超过即启动语义压缩
   input_target_after_compact: 12000
   input_hard_limit: 24000       # 超过前必须再次压缩，禁止请求模型
-  max_model_steps: 12           # 一次模型响应算一步；同一响应的并行工具仍算一步
-  max_tool_calls: 24
-  max_tool_result_tokens: 1500
-  max_tool_total_tokens: 8000
-  max_tool_deadline_seconds: 20
+  max_model_turns: 24           # 仅作供应商失控熔断；不是“做满 24 轮”
+  max_tool_calls: 48            # 仅作成本熔断；模型在有效决定时立即结束
+  max_tool_total_tokens: 16000
+  deadline_seconds: 300         # 仅作单个 Runtime Cycle 的墙钟熔断
   max_same_call_without_new_source: 2
   max_compaction_attempts: 2
 ```
 
-这里没有把工具轮数固定为 2。模型可以在有进展时继续查询，但每一步都受到多个独立守卫：达到 `max_model_steps`、`max_tool_calls`、工具 token 预算或截止时间即停止；同一工具使用相同参数且没有新增 `source_ids` 达到两次时立即停止；同一工具连续报错最多重试两次；压缩最多尝试两次。停止时向模型追加一次“仅根据现有 ContextPacket 输出 LifeDecision”的内部消息，禁止再提供工具；如果结构化输出仍无效，返回 `action=wait`。
+这里没有把工具轮数固定为 2。模型可以在有进展时继续查询，并在产出通过 Schema 校验的决定时立刻结束；不会为了“用完轮数”继续调用。`max_model_turns`、`max_tool_calls`、工具结果上下文容量和截止时间只防止异常成本；同一工具使用相同参数连续重复两次、连续工具错误或没有新证据时会提前熔断。熔断后向模型追加一次“仅根据现有 ContextPacket 输出 LifeDecision”的内部消息，禁止再提供工具；如果结构化输出仍无效，返回 `action=wait`。
 
 ```yaml
 DirectorLoopState:

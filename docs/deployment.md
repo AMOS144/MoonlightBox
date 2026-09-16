@@ -54,6 +54,43 @@ Runtime v1 依赖最新成功的 `PersonWorldProfile`。当前 LightRAG Sidecar 
 `persona_runtime` 进程执行，所以不会同时占用两份模型内存。模型或 adapter 加载失败时，Worker
 保留队列事件并记录失败，不会提交部分 LifeState 或重复公开消息。
 
+### Phoenix Agent Trace
+
+Phoenix 使用 OpenTelemetry/OpenInference 接收 Agent Trace，是调用链唯一观测后端。项目不再
+维护通用 Agent 的 `AgentRun`、步骤、工具调用或 checkpoint 账本；即使 Collector 暂时不可达，
+本次执行仍按 Harness 的超时、预算和输入版本防护结束，领域 Job、审核和 Executor 状态仍由各自
+数据库表维护。
+
+本机开发由 `./scripts/start.sh` 自动启动 Phoenix（默认 `127.0.0.1:6006`），数据写入与
+worktree 同级的 `.runtime-data/phoenix`。该进程不依赖 Docker。所有 `AgentLoopController`
+调用会以一次 Agent 执行为根 Span，向下关联 LangGraph 节点、Agent 决策回合、真实供应商模型请求、
+实际工具调用、LightRAG 检索和上下文压缩。根摘要分别给出调度回合数与真实 provider 请求数，并将
+确定性根因异步写成 Phoenix CODE annotation；可按
+`moonlightbox.agent.execution_id`、`moonlightbox.agent.name`、`moonlightbox.owner.type`、
+`moonlightbox.branch.id` 和 `moonlightbox.project.id` 定位问题。
+
+标准 `./scripts/start.sh` 只连接本机 Collector。单值属性受
+`MOONLIGHTBOX_PHOENIX_TRACE_MAX_CHARACTERS` 限制；但在正文采集开启时，运行输入、供应商请求/响应、
+工具入参与结果、LightRAG 返回和压缩前后上下文都会以分块 Span event 保存，便于完整回放。API key
+仍会强制脱敏。设 `MOONLIGHTBOX_PHOENIX_CAPTURE_CONTENT=false` 可只导出结构和 hash。通过只读 API
+`GET /api/observability/agent-executions/{execution_id}` 可取得同一 Trace 的原始 Span 树；该 API 不读取
+或写入任何自建运行账本。
+Docker 部署会额外启动 `phoenix` 服务，并通过容器内
+`http://phoenix:6006/v1/traces` 上报；宿主机可访问 `http://127.0.0.1:6006`。
+
+### 中国工作日历
+
+DayPlanAgent 不根据自然星期猜测是否上班。认知 Worker 在组装规划上下文时，通过
+`ChinaWorkCalendarService` 读取 [holiday-cn](https://github.com/NateScarlet/holiday-cn)
+年度数据；主地址使用 JSDelivr，GitHub Raw 是备用地址。远端地址固定在代码中，不能由模型
+或请求参数修改。
+
+校验成功的年度数据缓存在 `MOONLIGHTBOX_WORK_CALENDAR_CACHE_DIR`。默认每 24 小时使用
+ETag 或 Last-Modified 条件刷新；在线失败时继续使用最后一次有效缓存并标记
+`calendar_stale=true`，没有缓存时则返回 `calendar_verified=false`、`is_workday=null`，
+不退回“周一至周五一定上班”的不安全假设。使用过的数据集地址、国务院公告、拉取时间和
+ETag 会进入 DayPlan 元数据与 Cycle Trace，供问题复盘。
+
 ## 数据目录
 
 - `data/moonlightbox.db`：项目、消息、节点、模型版本和分支元数据
@@ -211,6 +248,9 @@ Docker 方式包含一次性 migration、API、独立事件分析 Worker 和前�
 
 ```bash
 cp .env.example .env
+# 默认把数据库、项目媒体与 Chroma 数据写到 `.worktrees/.runtime-data/data`，
+# 避免每个 worktree 各自产生一份 SQLite 数据库。部署到其他目录时应使用绝对路径。
+export MOONLIGHTBOX_HOST_DATA_DIR=/absolute/path/to/moonlightbox-runtime-data
 docker compose up --build
 ```
 
@@ -219,7 +259,7 @@ Compose 先执行 `alembic -c backend/alembic.ini upgrade head`，migration 成�
 Worker，因此不会用 `create_all` 代替旧数据库升级。
 
 API、migration 和 Worker 使用同一个后端镜像、同一份 `.env`，并共同挂载宿主机的
-`data/` 与 `models/`。SQLite 数据库位于 `data/moonlightbox.db`，只允许同一宿主机上的
+共享运行数据目录与 `models/`。SQLite 数据库位于共享目录的 `moonlightbox.db`，只允许同一宿主机上的
 API 与 Worker 两个进程共享；不要把该目录挂载到多台主机。备份时仍需停止写入进程并同时
 备份两个目录。
 

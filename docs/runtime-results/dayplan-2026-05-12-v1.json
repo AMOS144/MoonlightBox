@@ -1,0 +1,305 @@
+{
+  "id": "1034afea-2e54-4409-968a-77c1db478427",
+  "branch_id": "f9b90dab-cb11-4736-beb2-7633611f6e23",
+  "plan_date": "2026-05-12",
+  "blocks": [
+    {
+      "id": "0e03bfc6-78b5-4231-94fd-fee76974dcd3",
+      "start": "00:00",
+      "end": "01:00",
+      "activity": "深夜娱乐/聊天（延续周一深夜）",
+      "location_role": "公司宿舍（卧室）",
+      "default_availability": "available",
+      "basis": "historical_pattern",
+      "evidence_ids": [
+        "profile:8f6c245087cacd8fc8d8aa54f028679a78c4ebc624a5a4dffb0cfb5a28a9530b",
+        "profile:02d02676df1a50b5d42c1ad5915f286dd59b5f02bd972a0a9fcf608bf8d2fb4c"
+      ],
+      "confidence": "inferred",
+      "assumption": null
+    },
+    {
+      "id": "0990648a-c0f8-4250-a3ea-2835d0d62ef6",
+      "start": "01:00",
+      "end": "08:00",
+      "activity": "睡眠（公司宿舍）",
+      "location_role": "公司宿舍（卧室）",
+      "default_availability": "asleep",
+      "basis": "snapshot_routine",
+      "evidence_ids": [
+        "profile:8f6c245087cacd8fc8d8aa54f028679a78c4ebc624a5a4dffb0cfb5a28a9530b",
+        "profile:02d02676df1a50b5d42c1ad5915f286dd59b5f02bd972a0a9fcf608bf8d2fb4c"
+      ],
+      "confidence": "inferred",
+      "assumption": null
+    },
+    {
+      "id": "8dc797d2-cbc2-4597-ba03-5a475539b8a5",
+      "start": "08:00",
+      "end": "08:30",
+      "activity": "起床、洗漱、晨间整理",
+      "location_role": "公司宿舍",
+      "default_availability": "resting",
+      "basis": "snapshot_routine",
+      "evidence_ids": [
+        "profile:8f6c245087cacd8fc8d8aa54f028679a78c4ebc624a5a4dffb0cfb5a28a9530b"
+      ],
+      "confidence": "inferred",
+      "assumption": null
+    },
+    {
+      "id": "9847beac-3bce-415a-b64a-68e0fa0e7431",
+      "start": "08:30",
+      "end": "09:00",
+      "activity": "早餐（宿舍内）",
+      "location_role": "公司宿舍",
+      "default_availability": "resting",
+      "basis": "fallback",
+      "evidence_ids": [],
+      "confidence": "fallback",
+      "assumption": null
+    },
+    {
+      "id": "d706a922-5ca8-4424-8b04-50a1c065912f",
+      "start": "09:00",
+      "end": "09:30",
+      "activity": "出门前整理、叫男友起床（修复期主动联系）",
+      "location_role": "公司宿舍",
+      "default_availability": "resting",
+      "basis": "profile_inference",
+      "evidence_ids": [
+        "profile:8d8541dd5b3e2c904ef9674ba320c5d203b0f5d30710ca9d14b6d955146b1738",
+        "profile:840775c54257e6160cd51757dc222c903c600af39807d2396b29c623ea30153e",
+        "profile:01b264dca181113f0f84a7fc8f1b248627eb29691310179f3327647764b91a8b"
+      ],
+      "confidence": "inferred",
+      "assumption": "5/12 为试探—接触修复期最后一日，她重新发起'胖笨笨起床'早安扣1已写入此块；09:00-09:30 的精确时长按起床后整理+联系窗口模拟设定，非历史事实"
+    },
+    {
+      "id": "ce9e8766-099a-4390-b82d-4230c5b56baf",
+      "start": "09:30",
+      "end": "10:00",
+      "activity": "步行到办公室（公司宿舍步行可达）",
+      "location_role": "通勤路上",
+      "default_availability": "busy",
+      "basis": "simulation_assumption",
+      "evidence_ids": [],
+      "confidence": "inferred",
+      "assumption": "09:30-10:00 通勤时段的精确起止无可直接引用的当日证据；按住宿-办公区步行通勤约30分钟的合理节奏模拟设定，非历史事实"
+    },
+    {
+      "id": "8006e83d-cb13-4042-9a48-9dc938f98a86",
+      "start": "10:00",
+      "end": "12:00",
+      "activity": "办公室工作（上午班，处理日常任务）",
+      "location_role": "办公室/工位",
+      "default_availability": "busy",
+      "basis": "simulation_assumption",
+      "evidence_ids": [],
+      "confidence": "inferred",
+      "assumption": "10:00 上班与上午班 10:00-12:00 的精确时段无可直接引用的当日证据；按工作日一般作息（九、十点到岗）模拟设定，不作为历史事实主张"
+    },
+    {
+      "id": "60d85c88-bdb9-474d-8859-4dc64d525311",
+      "start": "12:00",
+      "end": "13:00",
+      "activity": "午餐（公司食堂）",
+      "location_role": "公司食堂",
+      "default_availability": "available",
+      "basis": "profile_inference",
+      "evidence_ids": [
+        "profile:a83425fe371ec71badf4d4c39c3c6e85e09f2a77b43dace418227880348f66e7",
+        "profile:32befa28df82aaecc89f9f15d385701ad944af10cde061abd01fa5fdc66a4f63"
+      ],
+      "confidence": "inferred",
+      "assumption": null
+    },
+    {
+      "id": "c6703ed3-b421-4a96-a749-663d3f726e87",
+      "start": "13:00",
+      "end": "13:30",
+      "activity": "午休（中午容易困倦，小憩恢复精力）",
+      "location_role": "公司休息区/工位",
+      "default_availability": "resting",
+      "basis": "simulation_assumption",
+      "evidence_ids": [],
+      "confidence": "inferred",
+      "assumption": "13:00-13:30 午休时段的精确起止无可直接引用的证据；按午后短暂小憩节奏模拟设定，不作为历史事实主张"
+    },
+    {
+      "id": "d8944499-5662-4e46-8983-4ecfd9418e56",
+      "start": "13:30",
+      "end": "17:30",
+      "activity": "办公室工作（下午班，常被平级同事使唤；下午易情绪低落）",
+      "location_role": "办公室/工位",
+      "default_availability": "busy",
+      "basis": "profile_inference",
+      "evidence_ids": [
+        "profile:6d30e4d9f00abd4409788ea0942a55e1c1b368bff03d9cafa114ae15a0a1d41f",
+        "profile:32befa28df82aaecc89f9f15d385701ad944af10cde061abd01fa5fdc66a4f63",
+        "profile:fae865c33b97da91e65dc805bf1651cbde0ab8328ace86f3b02e9f0a6a840f15"
+      ],
+      "confidence": "inferred",
+      "assumption": null
+    },
+    {
+      "id": "9e138107-a10d-44cb-be6b-a871fade0911",
+      "start": "17:30",
+      "end": "18:30",
+      "activity": "加班/处理同事甩来的事务",
+      "location_role": "办公室/工位",
+      "default_availability": "busy",
+      "basis": "profile_inference",
+      "evidence_ids": [
+        "profile:6d30e4d9f00abd4409788ea0942a55e1c1b368bff03d9cafa114ae15a0a1d41f",
+        "profile:02d02676df1a50b5d42c1ad5915f286dd59b5f02bd972a0a9fcf608bf8d2fb4c"
+      ],
+      "confidence": "inferred",
+      "assumption": null
+    },
+    {
+      "id": "5b9e315e-50cf-42a7-a7a0-84e0f610b49b",
+      "start": "18:30",
+      "end": "19:30",
+      "activity": "晚餐（公司食堂）",
+      "location_role": "公司食堂",
+      "default_availability": "available",
+      "basis": "profile_inference",
+      "evidence_ids": [
+        "profile:a83425fe371ec71badf4d4c39c3c6e85e09f2a77b43dace418227880348f66e7",
+        "profile:32befa28df82aaecc89f9f15d385701ad944af10cde061abd01fa5fdc66a4f63"
+      ],
+      "confidence": "inferred",
+      "assumption": null
+    },
+    {
+      "id": "601c2261-74c5-4458-8d5a-07ab8c3b2cb5",
+      "start": "19:30",
+      "end": "20:00",
+      "activity": "步行回公司宿舍",
+      "location_role": "通勤路上",
+      "default_availability": "busy",
+      "basis": "simulation_assumption",
+      "evidence_ids": [],
+      "confidence": "inferred",
+      "assumption": "19:30-20:00 步行回宿舍的精确时段无可直接引用的当日证据；按下班后步行回宿舍的节奏模拟设定，非历史事实"
+    },
+    {
+      "id": "6d87efce-154f-458c-b8cd-b06dbf0479c2",
+      "start": "20:00",
+      "end": "21:00",
+      "activity": "回宿舍洗漱、放松、简单休整",
+      "location_role": "公司宿舍",
+      "default_availability": "resting",
+      "basis": "profile_inference",
+      "evidence_ids": [
+        "profile:32befa28df82aaecc89f9f15d385701ad944af10cde061abd01fa5fdc66a4f63",
+        "profile:8f6c245087cacd8fc8d8aa54f028679a78c4ebc624a5a4dffb0cfb5a28a9530b"
+      ],
+      "confidence": "inferred",
+      "assumption": null
+    },
+    {
+      "id": "3265c2e4-7671-476a-b406-dc9e86ce1e98",
+      "start": "21:00",
+      "end": "22:30",
+      "activity": "与男友视频通话/聊天（异地恋、修复期主动连接）",
+      "location_role": "公司宿舍",
+      "default_availability": "available",
+      "basis": "profile_inference",
+      "evidence_ids": [
+        "profile:8d8541dd5b3e2c904ef9674ba320c5d203b0f5d30710ca9d14b6d955146b1738",
+        "profile:01b264dca181113f0f84a7fc8f1b248627eb29691310179f3327647764b91a8b",
+        "profile:32befa28df82aaecc89f9f15d385701ad944af10cde061abd01fa5fdc66a4f63",
+        "profile:840775c54257e6160cd51757dc222c903c600af39807d2396b29c623ea30153e"
+      ],
+      "confidence": "inferred",
+      "assumption": null
+    },
+    {
+      "id": "251ea146-61f1-4e33-9f4c-f47c5cede4c5",
+      "start": "22:30",
+      "end": "24:00",
+      "activity": "晚间娱乐（刷抖音、看《围城》、碎片化自我管理）",
+      "location_role": "公司宿舍",
+      "default_availability": "available",
+      "basis": "profile_inference",
+      "evidence_ids": [
+        "profile:32befa28df82aaecc89f9f15d385701ad944af10cde061abd01fa5fdc66a4f63",
+        "profile:8f6c245087cacd8fc8d8aa54f028679a78c4ebc624a5a4dffb0cfb5a28a9530b"
+      ],
+      "confidence": "inferred",
+      "assumption": "周二非'周一前夜死熬'固定窗口，按她一般23:00-01:00入睡节奏将晚间娱乐设至24:00作为衔接，1:00后进入睡眠；具体是否1:00入睡次日再确认"
+    }
+  ],
+  "version": 1,
+  "created_at": "2026-09-11 17:36:14.671398",
+  "generation_metadata": {
+    "status": "agent",
+    "preparation": {
+      "status": "ready",
+      "attempt": 1,
+      "retry_at": null,
+      "error_code": null,
+      "updated_at": "2026-09-11T17:36:14.026907+00:00",
+      "job_id": "e7e64960-c73a-4b07-a0ae-61de6c8cc306",
+      "owner_key": "cycle:f9b90dab-cb11-4736-beb2-7633611f6e23:plan:f9b90dab-cb11-4736-beb2-7633611f6e23:2026-05-12"
+    },
+    "commit_receipts": {
+      "13754caf09ba93ac5eec337e73b4656175067e831d16912f4d964e54f93f6c68": {
+        "plan_date": "2026-05-12",
+        "plan_version": 1,
+        "status": "committed",
+        "key": "13754caf09ba93ac5eec337e73b4656175067e831d16912f4d964e54f93f6c68"
+      }
+    },
+    "commit_keys": [
+      "13754caf09ba93ac5eec337e73b4656175067e831d16912f4d964e54f93f6c68"
+    ],
+    "planner_version": "runtime-day-plan-v1",
+    "mode": "initial",
+    "source_ids": [
+      "profile:8f6c245087cacd8fc8d8aa54f028679a78c4ebc624a5a4dffb0cfb5a28a9530b",
+      "profile:02d02676df1a50b5d42c1ad5915f286dd59b5f02bd972a0a9fcf608bf8d2fb4c",
+      "profile:8d8541dd5b3e2c904ef9674ba320c5d203b0f5d30710ca9d14b6d955146b1738",
+      "profile:840775c54257e6160cd51757dc222c903c600af39807d2396b29c623ea30153e",
+      "profile:01b264dca181113f0f84a7fc8f1b248627eb29691310179f3327647764b91a8b",
+      "profile:a83425fe371ec71badf4d4c39c3c6e85e09f2a77b43dace418227880348f66e7",
+      "profile:32befa28df82aaecc89f9f15d385701ad944af10cde061abd01fa5fdc66a4f63",
+      "profile:6d30e4d9f00abd4409788ea0942a55e1c1b368bff03d9cafa114ae15a0a1d41f",
+      "profile:fae865c33b97da91e65dc805bf1651cbde0ab8328ace86f3b02e9f0a6a840f15"
+    ],
+    "assumptions": [
+      "5/12 周二为普通工作日，沿用 5/11 已生效的作息骨架（09:30-10:00 通勤、10:00-12:00 上午班、12:00-13:00 午餐、13:30-17:30 下午班、17:30-18:30 加班、18:30-19:30 晚餐、19:30-20:00 回宿舍）",
+      "5/12 为关系试探—接触修复期最后一日，早晨她重新发起'胖笨笨起床'早安扣1已写入 09:00-09:30 块",
+      "晚间娱乐时长按一般工作日节奏设为 22:30-24:00；周二非'周一前夜死熬'窗口，深夜延续时长较周一略短",
+      "午餐/晚餐均在公司食堂解决，符合其工作日固定模式",
+      "通勤、上午班、午休三个精确时段无可直接引用的当日证据，已显式标注 simulation_assumption"
+    ],
+    "reason": "5/12 周二工作日，沿用 5/11 已生效的作息骨架。考虑到关系处于试探—接触修复期，早晨加入主动叫男友起床块，晚间视频通话保持活跃连接。通勤/上午班/午休精确时段无可直接引用的当日证据，以 simulation_assumption 模拟设定并显式标注。",
+    "date_features": {
+      "date": "2026-05-12",
+      "weekday": 1,
+      "weekday_name": "Tuesday",
+      "is_weekday": true,
+      "is_workday": true,
+      "day_type": "regular_workday",
+      "holiday": null,
+      "holiday_name": null,
+      "calendar_region": "CN",
+      "calendar_verified": true,
+      "calendar_stale": false,
+      "calendar_reason": null,
+      "calendar_source": {
+        "provider": "holiday-cn",
+        "dataset_url": "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/2026.json",
+        "papers": [
+          "https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm"
+        ],
+        "fetched_at": "2026-09-11T12:38:44.480353+00:00",
+        "etag": "W/\"12eb-sgJOooNkWH1gCcy49Iaq/p/GKyw\""
+      }
+    },
+    "updated_at": "2026-05-11T14:51:11.211684+00:00"
+  }
+}
