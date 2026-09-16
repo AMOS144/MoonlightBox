@@ -27,3 +27,9 @@ wheels/
 # 前端构建产物
 frontend/node_modules/
 frontend/dist/
+
+# 编辑器本地配置
+.vscode/
+
+# LightRAG sidecar 运行期产出的索引数据
+sidecars/lightrag_sidecar/data/
