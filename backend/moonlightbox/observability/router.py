@@ -11,7 +11,6 @@ from time import monotonic, sleep
 
 from fastapi import APIRouter, HTTPException
 from httpx import HTTPStatusError
-from phoenix.client import Client as PhoenixClient
 
 from moonlightbox.config import Settings
 
@@ -155,6 +154,13 @@ def _get_spans(
     trace_id: str | None = None,
 ) -> list[dict[str, object]]:
     """使用 Phoenix 官方 Client 查询，避免复制服务端筛选参数的编码规则。"""
+
+    try:
+        from phoenix.client import Client as PhoenixClient
+    except ModuleNotFoundError as error:
+        # arize-phoenix 服务端是 observability extra 的可选依赖；未安装时（如
+        # All-in-One 镜像）所有端点已在 phoenix_enabled 检查处拦截，不会走到这里。
+        raise HTTPException(status_code=409, detail="Phoenix 组件未安装") from error
 
     try:
         client = PhoenixClient(base_url=base_url)
