@@ -104,6 +104,9 @@ def create_runtime_router(database: Database, settings: Settings) -> APIRouter:
         snapshot = session.scalar(
             select(RuntimeSnapshotRow).where(RuntimeSnapshotRow.branch_id == branch_id)
         )
+        bootstrap = session.scalar(
+            select(Job).where(Job.dedupe_key == f"runtime-v1-cycle:bootstrap:{branch_id}")
+        )
         understanding_started = initialization is not None and initialization.status != "pending"
         state = (
             "ready"
@@ -111,6 +114,12 @@ def create_runtime_router(database: Database, settings: Settings) -> APIRouter:
             else "failed"
             if branch.lifecycle_status == "prepare_failed"
             else "preparing"
+        )
+        # 透出失败任务的真实错误码（如 quota_exhausted），前端据此给出可操作提示。
+        failure_code = (
+            (initialization.error_code if initialization else None)
+            or (bootstrap.error_code if bootstrap is not None and bootstrap.status == "failed" else None)
+            or "preparation_failed"
         )
         return {
             "branch_id": branch_id,
@@ -128,12 +137,8 @@ def create_runtime_router(database: Database, settings: Settings) -> APIRouter:
             else "planning",
             "message_count": 0,
             "event_count": 0,
-            "error_code": (
-                (initialization.error_code if initialization else None) or "preparation_failed"
-            )
-            if state == "failed"
-            else None,
-            "error_message": "分支准备失败，可重试并查看 Phoenix" if state == "failed" else None,
+            "error_code": failure_code if state == "failed" else None,
+            "error_message": "分支准备未完成，已有进展保留。" if state == "failed" else None,
         }
 
     @public_branch_router.get("/{branch_id}/preparation")

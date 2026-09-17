@@ -40,7 +40,7 @@ export function BranchPreparationPage() {
       {value.background.profile_schema_version === 'v3' ? <V3ProfileGrid projectId={projectId ?? ''} profile={value.background} locked selectedKeys={new Set()} onToggle={() => {}} /> : <Text size="sm">此分支保留原先绑定的背景，不会自动采用项目的新版本。</Text>}
     </details>}
     {value?.status === 'preparing' && <Alert color="blue">系统正在后台准备。可以离开，回来仍会显示这条分支的进展。</Alert>}
-    {value?.status === 'failed' && <Alert color="red" title="准备暂时受阻"><Text>{userMessage(value.error_message ?? '准备未完成，已有进展保留。')}</Text><Button mt="md" loading={retry.isPending} onClick={() => retry.mutate()}>恢复准备</Button></Alert>}
+    {value?.status === 'failed' && <Alert color="red" title="准备暂时受阻"><Text>{userMessage(value.error_message ?? '准备未完成，已有进展保留。', undefined, value.error_code ?? undefined)}</Text><Button mt="md" loading={retry.isPending} onClick={() => retry.mutate()}>恢复准备</Button></Alert>}
     {value?.status === 'ready' && <Button component={Link} to={`/projects/${projectId}/branches/${branchId}`} onClick={() => { void client.invalidateQueries({ queryKey: ['branches', projectId] }) }}>进入聊天</Button>}
     <Button component={Link} to={`/projects/${projectId}/branches`} variant="subtle" color="gray" leftSection={<Icon name="back" size={16} />}>返回我的分支</Button>
   </Stack></Paper>

@@ -224,7 +224,7 @@ class RuntimeCloudClient:
                     record_span_attributes(
                         span, {"http.response.status_code": response.status_code}
                     )
-                message, usage = _response_message(response, api_key=self._api_key)
+                message, usage = _response_message(response, api_key=self._api_key, is_minimax=self._is_minimax)
                 record_span_output(span, message)
                 for attribute, key in (
                     ("prompt", "prompt_tokens"),
@@ -507,11 +507,68 @@ def _openai_tool_call(call: ToolCall) -> dict[str, Any]:
     }
 
 
+# MiniMax 官方错误码（platform.minimax.cn/docs/api-reference/errorcode）。
+# 限流类（1002/1041/2045）稍后重试即可；配额类（1008/2056）须充值、升级套餐或等
+# 下一计费窗口，自动重试无意义；鉴权类（1004/2049）与涉敏类（1026/1027）须人工处理。
+_MINIMAX_ERROR_CODES: dict[int, tuple[str, str]] = {
+    1000: ("server", "Runtime 云端大模型暂时不可用"),
+    1001: ("timeout", "Runtime 云端大模型请求超时"),
+    1002: ("rate_limited", "Runtime 云端大模型请求受限"),
+    1004: ("authentication", "Runtime 云端大模型认证失败"),
+    1008: ("billing_unavailable", "Runtime 云端大模型账户余额不足"),
+    1024: ("server", "Runtime 云端大模型暂时不可用"),
+    1026: ("provider_input_rejected", "Runtime 云端大模型判定输入涉敏"),
+    1027: ("provider_output_rejected", "Runtime 云端大模型判定输出涉敏"),
+    1033: ("server", "Runtime 云端大模型暂时不可用"),
+    1039: ("invalid_request", "Runtime 云端大模型 max_tokens 超出限制"),
+    1041: ("rate_limited", "Runtime 云端大模型连接数受限"),
+    1042: ("invalid_request", "Runtime 云端大模型请求含过多非法字符"),
+    2013: ("invalid_request", "Runtime 云端大模型请求参数无效"),
+    2045: ("rate_limited", "Runtime 云端大模型请求频率增长超限"),
+    2049: ("authentication", "Runtime 云端大模型认证失败"),
+    2056: ("quota_exhausted", "Runtime 云端大模型套餐用量已达上限"),
+}
+
+
+def _minimax_status(payload: Any) -> int | None:
+    """MiniMax 两种错误外壳：base_resp.status_code（可伴随 HTTP 200）与
+    OpenAI 兼容 error.message 尾部的 "(2056)"。"""
+    if not isinstance(payload, dict):
+        return None
+    base = payload.get("base_resp")
+    if isinstance(base, dict) and isinstance(base.get("status_code"), int) and base["status_code"]:
+        return int(base["status_code"])
+    error = payload.get("error")
+    message = error.get("message") if isinstance(error, dict) else None
+    if isinstance(message, str):
+        match = re.search(r"\((\d{4,5})\)\s*$", message)
+        if match:
+            return int(match.group(1))
+    return None
+
+
 def _response_message(
-    response: httpx.Response, *, api_key: str = ""
+    response: httpx.Response, *, api_key: str = "", is_minimax: bool = False
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """提取完整 assistant 消息，错误详情只映射成本地安全错误码。"""
 
+    try:
+        payload: Any = response.json()
+    except ValueError:
+        payload = None
+    # MiniMax 官方错误码优先于 HTTP 状态：同属 429 的“频率超限”（1002，可稍后重试）
+    # 与“Token Plan 用量上限”（2056，须等下一计费窗口或升级套餐）不能混为一谈。
+    minimax_status = _minimax_status(payload) if is_minimax else None
+    if minimax_status in _MINIMAX_ERROR_CODES:
+        code, message = _MINIMAX_ERROR_CODES[minimax_status]
+        raise RuntimeCloudInferenceError(
+            code,
+            message,
+            diagnostic={
+                "http_status": response.status_code,
+                "minimax_status": minimax_status,
+            },
+        )
     if response.status_code in {401, 403}:
         raise RuntimeCloudInferenceError("authentication", "Runtime 云端大模型认证失败")
     if response.status_code == 402:
@@ -523,14 +580,10 @@ def _response_message(
     if response.status_code >= 500:
         raise RuntimeCloudInferenceError("server", "Runtime 云端大模型暂时不可用")
     if response.status_code >= 400:
-        try:
-            body = response.json()
-            detail = body.get("error", body) if isinstance(body, dict) else {}
-            description = (
-                str(detail.get("message", "")) if isinstance(detail, dict) else str(detail)
-            )
-        except ValueError:
-            description = "非 JSON 错误响应"
+        detail = payload.get("error", payload) if isinstance(payload, dict) else {}
+        description = (
+            str(detail.get("message", "")) if isinstance(detail, dict) else str(detail)
+        ) if payload is not None else "非 JSON 错误响应"
         if api_key:
             description = description.replace(api_key, "[REDACTED_SECRET]")
         # 供应商明确拒绝输入不能伪装成格式错误，也不靠同内容重试掩盖。
@@ -544,9 +597,8 @@ def _response_message(
             },
         )
     try:
-        payload = response.json()
         message = payload["choices"][0]["message"]
-    except (ValueError, KeyError, IndexError, TypeError) as error:
+    except (KeyError, IndexError, TypeError) as error:
         raise RuntimeCloudInferenceError(
             "invalid_response", "Runtime 云端大模型响应无效"
         ) from error
