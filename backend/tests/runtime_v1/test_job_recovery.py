@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from moonlightbox.jobs.runtime_recovery import recovery, resume_job, scan_recovery
-from moonlightbox.jobs.service import InvalidJobTransitionError, JobService
+from moonlightbox.jobs.service import JobService
 from moonlightbox.runtime_v1.db_models import RuntimeClockRow, RuntimeEventRow
 from moonlightbox.runtime_v1.jobs import enqueue_input_tick
 from test_peer_collaboration import session  # noqa: F401
@@ -67,9 +67,13 @@ def test_terminal_releases_slot_without_replaying_old_input(session, code, retri
     assert session.get(RuntimeEventRow, "new").status == "queued"
     scan_recovery(session, datetime.now(UTC) + timedelta(days=1))
     assert job.status == "failed"
-    with pytest.raises(InvalidJobTransitionError):
-        service.resume(job.id)
-    assert enqueue_input_tick(session, "b", "new")
+    # terminal 只阻止自动恢复；用户修复配额/密钥等外部原因后显式重试应当放行，
+    # 恢复后重新占位，新输入不会绕过它另起任务。
+    service.resume(job.id)
+    assert job.status == "queued"
+    assert recovery(job) == {}
+    assert job.checkpoint["runtime_retry_attempt"] == retries + 1
+    assert not enqueue_input_tick(session, "b", "new")
 
 
 def test_expired_worker_uses_same_recovery_policy(session):

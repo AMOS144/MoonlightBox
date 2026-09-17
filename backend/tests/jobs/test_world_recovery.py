@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from moonlightbox.db import Database
 from moonlightbox.jobs.models import Job
 from moonlightbox.jobs.runtime_recovery import WORLD_KIND, recovery, scan_recovery
-from moonlightbox.jobs.service import InvalidJobTransitionError, JobService
+from moonlightbox.jobs.service import JobService
 
 
 @pytest.fixture
@@ -42,8 +42,11 @@ def test_world_backoff_keeps_progress_and_exhausts_total_budget(service):
             job = service.resume(job.id)
     assert recovery(job)["reason"] == "retry_exhausted"
     assert scan_recovery(service.session, datetime.now(UTC) + timedelta(days=1)) == 0
-    with pytest.raises(InvalidJobTransitionError):
-        service.resume(job.id)
+    # 自动恢复已收口，但用户修复供应商问题后仍可显式重试，累计次数保留。
+    job = service.resume(job.id)
+    assert job.status == "queued"
+    assert recovery(job) == {}
+    assert job.checkpoint["job_retry_attempt"] == 6
 
 
 def test_content_rejection_is_terminal_without_consuming_retry_loop(service):

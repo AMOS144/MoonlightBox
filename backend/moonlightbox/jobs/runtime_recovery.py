@@ -192,9 +192,9 @@ def resume_job(session, job, now, *, manual=False):
     session.refresh(job)
     settle_failure(session, job, now)
     state = recovery(job)
-    if state["status"] == "terminal" and not (
-        manual and job.kind == WORLD_KIND
-    ):
+    # terminal 只阻止自动恢复；用户修复配额/密钥等外部原因后显式重试应当放行，
+    # 累计次数保留，再次失败仍按既有策略收口。
+    if state["status"] == "terminal" and not manual:
         return False
     if not manual and datetime.fromisoformat(state["retry_at"]) > utc(now):
         return False
