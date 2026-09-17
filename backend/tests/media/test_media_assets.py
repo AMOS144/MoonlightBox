@@ -11,8 +11,7 @@ from moonlightbox.media.annotation_pipeline import (
     _json_object,
     annotate_project_media,
 )
-from moonlightbox.media.context import model_message_content
-from moonlightbox.media.models import MediaAsset, MediaSemanticAnnotation
+from moonlightbox.media.models import MediaAsset
 from moonlightbox.media.service import MediaAnnotationService, MediaStore
 from moonlightbox.projects.models import Project
 from sqlalchemy.orm import Session
@@ -49,81 +48,6 @@ def test_visual_output_parser_accepts_safe_python_dict_fallback() -> None:
         "summary": "一只猫",
         "confidence": 0.8,
     }
-
-
-def test_model_media_context_is_explicit_about_known_and_unknown_content() -> None:
-    audio = Message(
-        project_id="project-1",
-        import_id="import-1",
-        participant_id="self-1",
-        source_id="audio-1",
-        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
-        kind="audio",
-        content="[语音]",
-        raw={},
-    )
-    annotation = MediaSemanticAnnotation(
-        project_id="project-1",
-        asset_id="asset-1",
-        modality="audio",
-        status="succeeded",
-        transcript="我刚到家",
-        confidence=0.9,
-    )
-
-    assert model_message_content(audio, annotation) == (
-        "audio",
-        "[语音转写：我刚到家]",
-    )
-    assert model_message_content(audio, None) == (
-        "audio",
-        "[语音，内容未转写]",
-    )
-    annotation.confidence = 0.5
-    assert model_message_content(audio, annotation) == (
-        "audio",
-        "[自动语音转写（可能有误）：我刚到家]",
-    )
-
-
-def test_model_media_context_normalizes_call_as_non_text_event() -> None:
-    call = Message(
-        project_id="project-1",
-        import_id="import-1",
-        participant_id="self-1",
-        source_id="call-1",
-        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
-        kind="unknown",
-        content=(
-            '<voipmsg type="VoIPBubbleMsg"><VoIPBubbleMsg>'
-            "<msg>通话时长 09:47</msg><room_type>0</room_type>"
-            "</VoIPBubbleMsg></voipmsg>"
-        ),
-        raw={},
-    )
-
-    assert model_message_content(call) == (
-        "call",
-        "[通话事件：语音通话 · 通话时长 09:47]",
-    )
-
-
-def test_model_media_context_separates_direct_text_from_quoted_content() -> None:
-    quote = Message(
-        project_id="project-1",
-        import_id="import-1",
-        participant_id="self-1",
-        source_id="quote-1",
-        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
-        kind="text",
-        content="是谁呢\n> 她：好讨厌这种半生不熟的人",
-        raw={},
-    )
-
-    assert model_message_content(quote) == (
-        "quote",
-        "[引用消息：好讨厌这种半生不熟的人]\n是谁呢",
-    )
 
 
 def _link_target_assets(

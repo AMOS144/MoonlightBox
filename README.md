@@ -4,7 +4,7 @@
 
 ## 主要能力
 
-- 导入 wxecho CSV、JSON、TXT 聊天记录并预览、清洗、脱敏
+- 导入 wxecho CSV、JSON、TXT 聊天记录并预览
 - 通过事件分段、多信号变化检测和 LLM 复核生成可追溯的关键节点
 - 使用带时间边界的分支状态快照控制分支上下文
 - 在 Linux/WSL 上通过 PyTorch、Transformers 与 PEFT 训练、加载 LoRA
@@ -23,6 +23,28 @@
 WSL/Linux 是完整后端运行环境：数据导入、LightRAG、人物档案编译、API、Worker、人格推理
 和 QLoRA 训练均在 Linux 进程中执行。`./scripts/start.sh` 会安装 `linux-ml` 依赖并启动
 独立人格服务。
+
+## Docker 一键体验
+
+不想配置 Python/Node 环境时，可以直接使用 All-in-One 镜像（包含前端、后端、LightRAG
+图谱与全部 Worker；本版不含本地 LoRA 训练/推理，人格回复由云端认知模型生成）：
+
+```bash
+cp docker/runtime.env.example .env   # 填入 MiniMax 与 Embedding 的 API key
+docker run -d --name moonlightbox -p 8080:80 \
+  -v moonlightbox-data:/app/data \
+  --env-file .env \
+  ghcr.io/amos144/moonlightbox:latest
+```
+
+打开 `http://localhost:8080`。说明：
+
+- 所有运行数据（SQLite、向量库、LightRAG 索引、设置）保存在 `moonlightbox-data`
+  卷中，删除容器不丢数据。
+- 镜像不含任何 API key；cognition / 节点分析模型也可以在 Web「设置」页配置。
+- 自行构建：`docker build -f Dockerfile.allinone -t moonlightbox:allinone .`。
+- 需要本地 LoRA 训练/推理与 Phoenix Trace 浏览器时，使用根 `Dockerfile` 与
+  `docker-compose.yml` 的分体式多容器部署。
 
 ## 本机启动
 

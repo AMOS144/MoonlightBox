@@ -8,11 +8,6 @@ from fastapi.responses import JSONResponse
 from moonlightbox.agent_runtime.tasks import AgentTaskError
 from moonlightbox.config import Settings
 from moonlightbox.db import Database
-from moonlightbox.evaluation.models import (
-    HumanBlindCase,
-    HumanBlindRating,
-    HumanBlindStudy,
-)
 from moonlightbox.evaluation.router import create_evaluation_router
 from moonlightbox.events.router import create_events_router
 from moonlightbox.imports.router import create_imports_router
@@ -21,72 +16,14 @@ from moonlightbox.media.router import create_media_router
 from moonlightbox.observability import initialize_phoenix, shutdown_phoenix
 from moonlightbox.observability.router import create_observability_router
 from moonlightbox.projects.router import create_projects_router
-from moonlightbox.runtime_v1.db_models import (
-    RuntimeClockRow,
-    RuntimeDayPlanRow,
-    RuntimeEventRow,
-    RuntimeLifeEventRow,
-    RuntimeLifeStateRow,
-    RuntimeMemoryRow,
-    RuntimeSnapshotRow,
-    RuntimeWakeupRow,
-)
 from moonlightbox.runtime_v1.router import create_runtime_router
 from moonlightbox.spatial.router import create_spatial_router
 from moonlightbox.training.confirmation_router import (
     create_training_confirmation_router,
 )
 from moonlightbox.training.router import create_models_router
-from moonlightbox.world.models import (
-    AtomicWorldClaim,
-    ConversationBundle,
-    ConversationBundleMessage,
-    EntityMergeProposal,
-    PersonWorldAgentRun,
-    PersonWorldProfile,
-    PersonWorldProfileDraft,
-    PersonWorldRevisionMessage,
-    PersonWorldRevisionSession,
-    WorldChangeApproval,
-    WorldCorrection,
-    WorldEvidence,
-    WorldGraphChangeSet,
-    WorldGraphOperationLog,
-    WorldGraphVersion,
-    WorldPublication,
-)
 from moonlightbox.world.person_world.router import create_person_world_agent_router
 from moonlightbox.world.router import create_world_router
-
-_RUNTIME_METADATA_MODELS = (
-    HumanBlindStudy,
-    HumanBlindCase,
-    HumanBlindRating,
-    WorldGraphVersion,
-    ConversationBundle,
-    ConversationBundleMessage,
-    PersonWorldProfile,
-    EntityMergeProposal,
-    PersonWorldAgentRun,
-    WorldEvidence,
-    AtomicWorldClaim,
-    PersonWorldProfileDraft,
-    PersonWorldRevisionSession,
-    PersonWorldRevisionMessage,
-    WorldCorrection,
-    WorldGraphChangeSet,
-    WorldChangeApproval,
-    WorldGraphOperationLog,
-    WorldPublication,
-    RuntimeClockRow,
-    RuntimeDayPlanRow,
-    RuntimeEventRow,
-    RuntimeLifeEventRow,
-    RuntimeLifeStateRow,
-    RuntimeMemoryRow,
-    RuntimeSnapshotRow,
-    RuntimeWakeupRow,
-)
 
 
 def is_linux_inference_available() -> bool:
