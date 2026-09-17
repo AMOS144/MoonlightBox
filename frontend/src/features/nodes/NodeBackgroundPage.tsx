@@ -39,7 +39,7 @@ export function NodeBackgroundPage() {
   }
 
   return <>
-    <PageHeader title="起点背景" description={`起点：${confirmed.cutoff_at} · Agent 逐栏整理这个时刻的人物背景，确认发布后就能建立分支。`} />
+    <PageHeader title="起点背景" description={`起点：${confirmed.cutoff_at} · Agent 逐栏整理这个时刻的人物背景，审核后就能开始对话。`} />
     {!profileId && <NodeCompilationPanel
       key={confirmed.preview_hash}
       projectId={projectId}

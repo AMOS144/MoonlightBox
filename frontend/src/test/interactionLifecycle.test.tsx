@@ -94,7 +94,7 @@ test('节点栏目重试跟踪 Job，刷新可恢复，完成后自动读取新�
   await act(async () => { await second.client.invalidateQueries({ queryKey: ['node-section-retry'] }) })
   await waitFor(() => expect(refreshed).toBe(1))
   await waitFor(() => expect(screen.queryByRole('button', { name: '重试 identity' })).not.toBeInTheDocument())
-  expect(await screen.findByRole('button', { name: '确认并发布这个版本' })).toBeEnabled()
+  expect(await screen.findByRole('button', { name: '开始对话' })).toBeEnabled()
 })
 
 test('创建请求期间离开页面，迟到回执不再导航', async () => {

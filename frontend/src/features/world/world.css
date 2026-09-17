@@ -1,8 +1,12 @@
 .person-world-workbench { min-width: 0; }
 .profile-reading-layout { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 24px; }
 .profile-section-nav { position: sticky; top: 16px; align-self: start; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
-.profile-section-nav a { padding: 7px 8px; border-radius: 4px; }
-.profile-section-nav a:hover { color: var(--text); background: var(--surface-soft); }
+.profile-section-nav a {
+  padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface-raised);
+  text-align: center; white-space: nowrap;
+}
+.profile-section-nav a:hover { color: var(--text); border-color: var(--line-strong); background: var(--surface-soft); }
 .profile-reading-content { min-width: 0; max-width: 82ch; line-height: 1.7; }
 .profile-reading-content > [id] { scroll-margin-top: 20px; }
 .profile-reading-content .mantine-Text-root[data-size="sm"] { font-size: 14px; line-height: 1.7; }
@@ -16,9 +20,12 @@
 .person-world-workbench--agent-open {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(360px, 430px);
-  gap: 24px;
+  gap: 16px;
   align-items: start;
 }
+
+/* 对话框展开时画像铺满剩余宽度，不留大片空白。 */
+.person-world-workbench--agent-open .profile-reading-content { max-width: none; }
 
 .person-world-workbench__profile { min-width: 0; }
 

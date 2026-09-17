@@ -1,4 +1,4 @@
-import { Badge, Button, Card, Group, Stack, Text, Title } from '@mantine/core'
+import { Accordion, Badge, Button, Card, Group, Stack, Text, Title } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
 import { request } from '../../api/client'
 import type { ProfileStatementSelection } from './types'
@@ -76,13 +76,24 @@ export function V3ProfileGrid({ projectId, profile, locked, selectedKeys, onTogg
       return item ? selectable(section, label(name), item, `${key}.dimensions.${name}`) : null
     }
     const modelTitle = title ?? label(key)
-    return <details key={key}><summary>{modelTitle}</summary>
-      {selectable(section, `${modelTitle}整体理解`, { description: data.summary, basis: 'inferred' }, key)}
-      {list(data.candidates).length ? <Text>候选：{list(data.candidates).join(' / ')}（AI 推断）</Text> : null}
-      {grouped ? Object.entries(grouped).map(([domain, facets]) => <div key={domain}>
-        {dimension(domain)}<details><summary>{label(domain)}的三个侧面</summary>{facets.map(dimension)}</details>
-      </div>) : dimensions.map(item => dimension(text(item.dimension_id)))}
-    </details>
+    return <Accordion key={key} variant="separated" chevronPosition="left">
+      <Accordion.Item value={key}>
+        <Accordion.Control>{modelTitle}</Accordion.Control>
+        <Accordion.Panel>
+          {selectable(section, `${modelTitle}整体理解`, { description: data.summary, basis: 'inferred' }, key)}
+          {list(data.candidates).length ? <Text size="sm" c="dimmed">候选：{list(data.candidates).join(' / ')}（AI 推断）</Text> : null}
+          {grouped ? Object.entries(grouped).map(([domain, facets]) => <div key={domain}>
+            {dimension(domain)}
+            <Accordion variant="contained" chevronPosition="left">
+              <Accordion.Item value={domain}>
+                <Accordion.Control>{label(domain)}的三个侧面</Accordion.Control>
+                <Accordion.Panel>{facets.map(dimension)}</Accordion.Panel>
+              </Accordion.Item>
+            </Accordion>
+          </div>) : dimensions.map(item => dimension(text(item.dimension_id)))}
+        </Accordion.Panel>
+      </Accordion.Item>
+    </Accordion>
   }
 
   function moduleCard(raw: unknown) {
@@ -90,19 +101,35 @@ export function V3ProfileGrid({ projectId, profile, locked, selectedKeys, onTogg
     if (!spec) return null
     const groups = obj(m.details)
     return <Card withBorder p="md" key={moduleId}>
-      <details open={m.status !== 'past'}><summary>{text(m.title) || spec.label} · {states[text(m.status)] ?? '尚不了解'}</summary>
-        {selectable('life_context', text(m.title) || spec.label, m, '', moduleId)}
-        {Object.entries(spec.groups).map(([group, fields]) => {
-          const content = obj(groups[group])
-          const known = fields.filter(key => obj(content[key]).status === 'described')
-          const unknown = fields.filter(key => obj(content[key]).status !== 'described')
-          return <details key={group} open={known.length > 0}><summary>{spec.group_labels?.[group] ?? label(group)}</summary>
-            {selectable('life_context', `${spec.group_labels?.[group] ?? label(group)}整组`, { description: known.map(key => text(obj(content[key]).description)).filter(Boolean).join('；') }, `details.${group}`, moduleId)}
-            {known.map(key => selectable('life_context', label(key), obj(content[key]), `details.${group}.${key}`, moduleId))}
-            {unknown.length ? <details><summary>尚不了解或不适用（{unknown.length}）</summary>{unknown.map(key => selectable('life_context', label(key), obj(content[key]), `details.${group}.${key}`, moduleId))}</details> : null}
-          </details>
-        })}
-      </details>
+      <Accordion multiple defaultValue={m.status !== 'past' ? [moduleId] : []} chevronPosition="left">
+        <Accordion.Item value={moduleId}>
+          <Accordion.Control>{text(m.title) || spec.label} · {states[text(m.status)] ?? '尚不了解'}</Accordion.Control>
+          <Accordion.Panel>
+            {selectable('life_context', text(m.title) || spec.label, m, '', moduleId)}
+            {Object.entries(spec.groups).map(([group, fields]) => {
+              const content = obj(groups[group])
+              const known = fields.filter(key => obj(content[key]).status === 'described')
+              const unknown = fields.filter(key => obj(content[key]).status !== 'described')
+              const groupLabel = spec.group_labels?.[group] ?? label(group)
+              return <Accordion key={group} multiple defaultValue={known.length > 0 ? [group] : []} variant="contained" chevronPosition="left">
+                <Accordion.Item value={group}>
+                  <Accordion.Control>{groupLabel}</Accordion.Control>
+                  <Accordion.Panel>
+                    {selectable('life_context', `${groupLabel}整组`, { description: known.map(key => text(obj(content[key]).description)).filter(Boolean).join('；') }, `details.${group}`, moduleId)}
+                    {known.map(key => selectable('life_context', label(key), obj(content[key]), `details.${group}.${key}`, moduleId))}
+                    {unknown.length ? <Accordion variant="contained" chevronPosition="left">
+                      <Accordion.Item value="unknown">
+                        <Accordion.Control>尚不了解或不适用（{unknown.length}）</Accordion.Control>
+                        <Accordion.Panel>{unknown.map(key => selectable('life_context', label(key), obj(content[key]), `details.${group}.${key}`, moduleId))}</Accordion.Panel>
+                      </Accordion.Item>
+                    </Accordion> : null}
+                  </Accordion.Panel>
+                </Accordion.Item>
+              </Accordion>
+            })}
+          </Accordion.Panel>
+        </Accordion.Item>
+      </Accordion>
     </Card>
   }
 
@@ -125,9 +152,14 @@ export function V3ProfileGrid({ projectId, profile, locked, selectedKeys, onTogg
         </Group>
         {selectable(section.key, `${section.label}综述`, { description: data.summary }, 'summary')}
         {Object.entries(section.fields).map(([key, title]) => selectable(section.key, title, obj(data[key]), key))}
-        {section.key === 'relationship_with_user' ? <details><summary>人物表达资料</summary>
-          {data.expression_profile ? Object.entries(config.expression_fields ?? {}).map(([key, title]) => selectable(section.key, title, obj(obj(data.expression_profile)[key]), `expression_profile.${key}`)) : <Text size="sm" c="dimmed">此版本尚未编译表达资料，需重新调查本栏目并审核发布。</Text>}
-        </details> : null}
+        {section.key === 'relationship_with_user' ? <Accordion chevronPosition="left" variant="separated">
+          <Accordion.Item value="expression">
+            <Accordion.Control>人物表达资料</Accordion.Control>
+            <Accordion.Panel>
+              {data.expression_profile ? Object.entries(config.expression_fields ?? {}).map(([key, title]) => selectable(section.key, title, obj(obj(data.expression_profile)[key]), `expression_profile.${key}`)) : <Text size="sm" c="dimmed">此版本尚未编译表达资料，需重新调查本栏目并审核发布。</Text>}
+            </Accordion.Panel>
+          </Accordion.Item>
+        </Accordion> : null}
         {['big_five_bfi2', 'mbti', 'motivation', 'interpersonal_style'].filter(key => key in data).map(key => model(section.key, key, data[key]))}
         {list(data.interpersonal_styles).map(raw => { const style = obj(raw); return <div key={text(style.id)}><Title order={5}>{text(style.relationship_scope)}</Title>{model(section.key, `interpersonal_styles.${text(style.id)}.profile`, style.profile, '相处方式（IPC）')}</div> })}
         {list(data.context_modules).map(moduleCard)}

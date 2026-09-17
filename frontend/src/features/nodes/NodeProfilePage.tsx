@@ -1,7 +1,7 @@
 import { userMessage } from '../../components/feedback/messages'
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Group, Loader, Modal, Stack, Text, TextInput, Title } from '@mantine/core'
+import { ActionIcon, Alert, Button, Group, Loader, Stack, Text, Title, Tooltip } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Icon } from '../../components/Icon'
@@ -28,11 +28,7 @@ export function NodeProfile({ projectId, profileId, onRefresh }: { projectId: st
   const [openedPreference, setOpenedPreference] = useState<boolean | null>(null)
   const opened = openedPreference ?? wide ?? false
   const [locked, setLocked] = useState(false)
-  const [editing, setEditing] = useState(true)
-  const [branchModal, setBranchModal] = useState(false)
-  const [created, setCreated] = useState<string | null>(null)
   const [selections, setSelections] = useState<ProfileStatementSelection[]>([])
-  const [title, setTitle] = useState('新的时间分支')
   const root = `/api/projects/${projectId}/world-agent`
   const key = ['node-profile', projectId, profileId]
   const profile = useQuery({ queryKey: key, queryFn: () => request<Review>(`${root}/node-profiles/${profileId}`),
@@ -46,13 +42,22 @@ export function NodeProfile({ projectId, profileId, onRefresh }: { projectId: st
     refetchInterval: q => ['queued', 'running', 'cancelling'].includes(q.state.data?.status ?? '') ? 1500 : false,
   })
   const retryBusy = Boolean(retryTask && !['failed', 'interrupted', 'cancelled'].includes(retryJob.data?.status ?? ''))
-  const approve = useMutation({ mutationFn: () => request(`${root}/node-profiles/${data?.profile_id}/approve`, {
-    method: 'POST', body: JSON.stringify({ approval_hash: data?.approval_hash }),
-  }), onSuccess: () => { void client.invalidateQueries({ queryKey: key }) } })
-  const create = useMutation({ mutationFn: () => request<{ id: string }>(`/api/projects/${projectId}/branches`, {
-    method: 'POST', body: JSON.stringify({ title, publication_id: data?.publication_id,
-      investigation_id: data?.node_scope.investigation_id, preview_hash: data?.node_scope.preview_hash }),
-  }), onSuccess: () => { if (active.current) { setCreated(title); setBranchModal(false) } } })
+  // 开始对话 = 发布当前背景（若未发布）+ 建立并进入分支，一步完成。
+  const start = useMutation({ mutationFn: async () => {
+    if (!data) throw new Error('背景尚未加载')
+    let publicationId = data.publication_id
+    if (!publicationId) {
+      const approved = await request<{ publication_id: string }>(`${root}/node-profiles/${data.profile_id}/approve`, {
+        method: 'POST', body: JSON.stringify({ approval_hash: data.approval_hash }),
+      })
+      publicationId = approved.publication_id
+    }
+    return request<{ id: string }>(`/api/projects/${projectId}/branches`, {
+      method: 'POST', body: JSON.stringify({ title: `时间分支 ${data.node_scope.cutoff_at.slice(5, 16).replace('T', ' ')}`,
+        publication_id: publicationId,
+        investigation_id: data.node_scope.investigation_id, preview_hash: data.node_scope.preview_hash }),
+    })
+  }, onSuccess: branch => { navigate(`/projects/${projectId}/branches/${branch.id}`) } })
   const retry = useMutation({ mutationFn: (section: string) => request<{ job_id: string; section: string }>(`${root}/runs/${data?.agent_run_id}/sections/${section}/retry`, {
     method: 'POST', body: JSON.stringify({ idempotency_key: crypto.randomUUID() }),
   }), onSuccess: value => setRetryTask(value) })
@@ -75,8 +80,7 @@ export function NodeProfile({ projectId, profileId, onRefresh }: { projectId: st
       refreshLatest()
     }
   }, [data, retryTask, retryJob.data?.status, refreshLatest])
-  const error = profile.error || approve.error || create.error || retry.error || refreshDraft.error
-  const openCorrection = () => { setEditing(true); setOpenedPreference(true) }
+  const error = profile.error || start.error || retry.error || refreshDraft.error
   return (
     <div className={`person-world-workbench${opened ? ' person-world-workbench--agent-open' : ''}`}>
       <main className="person-world-workbench__profile">
@@ -86,30 +90,29 @@ export function NodeProfile({ projectId, profileId, onRefresh }: { projectId: st
           {retryJob.error && <Alert color="red">重试任务状态读取失败，进度仍保留。<Button onClick={() => void retryJob.refetch()}>重新读取任务</Button></Alert>}
           {retryTask && <Text role="status" size="sm">{retryJob.data?.status === 'succeeded' ? '栏目已完成，正在更新审核草稿。' : retryBusy ? '正在恢复所选栏目，可以离开，进度会保留。' : `栏目尚未完成。${userMessage(retryJob.data?.error_message)}`}</Text>}
           {data && <>
-            <Alert color="yellow" title="待审核背景">确认并发布后才会用于此起点分支；其他分支的背景不受影响。</Alert>
             <Group justify="space-between" wrap="wrap">
               <div>
                 <Title order={1}>审核人物背景</Title>
                 <Text c="dimmed" mt={6}>
-                  {data.node_scope.cutoff_at} · {data.node_scope.timezone} · {editing ? '点击内容勾选，在侧栏告诉 Agent 怎么改' : '此起点时刻的人物理解与生活背景'}
+                  {data.node_scope.cutoff_at} · {data.node_scope.timezone} · 点击内容勾选，在侧栏告诉 Agent 怎么改
                 </Text>
               </div>
-              <Group>
-                {editing && <Button variant="subtle" color="gray" leftSection={<Icon name="back" size={16} />} onClick={() => { setEditing(false); setOpenedPreference(false) }}>返回阅读</Button>}
-                {!opened && <Button variant="light" onClick={openCorrection}>{selections.length ? `继续修改（已选 ${selections.length} 项）` : '指出问题或补充事实'}</Button>}
-                {!data.publication_id && <Button color="green" disabled={locked || data.failed_sections.length > 0} loading={approve.isPending} onClick={() => approve.mutate()}>确认并发布这个版本</Button>}
+              <Group gap="xs">
+                <Button color="green" disabled={locked || data.failed_sections.length > 0} loading={start.isPending}
+                  onClick={() => start.mutate()}>开始对话</Button>
+                <Tooltip label={opened ? '收起对话框' : '展开对话框'}>
+                  <ActionIcon variant="subtle" color="gray" size="lg" aria-label={opened ? '收起对话框' : '展开对话框'}
+                    onClick={() => setOpenedPreference(!opened)}>
+                    <Icon name={opened ? 'panel-collapse' : 'panel-expand'} size={18} />
+                  </ActionIcon>
+                </Tooltip>
               </Group>
             </Group>
             {data.failed_sections.length > 0 && <Alert color="orange" title="部分栏目需要恢复">
               <Group>{data.failed_sections.map(section => <Button key={section} variant="light" size="xs" disabled={locked || retryBusy || refreshDraft.isPending} loading={retry.isPending} onClick={() => retry.mutate(section)}>重试 {section}</Button>)}</Group>
               <Button mt="sm" variant="subtle" disabled={retry.isPending || (retryBusy && retryJob.data?.status !== 'succeeded')} loading={refreshDraft.isPending} onClick={() => refreshDraft.mutate()}>读取最新草稿</Button>
             </Alert>}
-            {data.publication_id && <Alert color="green" title="此节点背景已发布">
-              <Text size="sm">可以基于这个起点创建新的时间分支。</Text>
-              <Button mt="sm" onClick={() => setBranchModal(true)}>准备分支</Button>
-            </Alert>}
-            {created && <Alert color="teal" title="分支已创建">分支「{created}」已创建。</Alert>}
-            <V3ProfileGrid projectId={projectId} profile={data.profile_v3} editing={editing} locked={locked} selectedKeys={new Set(selections.map(s => s.key))}
+            <V3ProfileGrid projectId={projectId} profile={data.profile_v3} editing locked={locked} selectedKeys={new Set(selections.map(s => s.key))}
               onToggle={item => setSelections(old => old.some(s => s.key === item.key) ? old.filter(s => s.key !== item.key) : [...old, item])}
               onToggleMany={(items, select) => setSelections(old => select
                 ? [...old.filter(s => !items.some(i => i.key === s.key)), ...items]
@@ -118,17 +121,8 @@ export function NodeProfile({ projectId, profileId, onRefresh }: { projectId: st
         </Stack>
       </main>
       {data && <PersonWorldRevisionPanel key={data.profile_id} projectId={projectId} baseProfileId={data.profile_id} opened={opened} selections={selections}
-        onClose={() => { setOpenedPreference(false); setEditing(false); void profile.refetch() }} onLockChange={setLocked}
+        onClose={() => { setOpenedPreference(false); void profile.refetch() }} onLockChange={setLocked}
         onRestoreSelections={setSelections} onStartNew={() => setSelections([])} />}
-      <Modal opened={branchModal} onClose={() => setBranchModal(false)} title="准备分支">
-        <Stack>
-          <TextInput label="分支名称" value={title} onChange={e => setTitle(e.currentTarget.value)} autoFocus />
-          <Group justify="flex-end">
-            <Button variant="subtle" color="gray" onClick={() => setBranchModal(false)}>取消</Button>
-            <Button disabled={!title.trim()} loading={create.isPending} onClick={() => create.mutate()}>创建并准备</Button>
-          </Group>
-        </Stack>
-      </Modal>
     </div>
   )
 }

@@ -8,7 +8,7 @@ export function AgentConversationPanel({ title, subject, scope, status, onClose,
 }) {
   return <Paper p="md" withBorder component="section" aria-label={title}><Stack gap="md">
     <Group justify="space-between"><Title order={4}>{title}</Title>
-      {onClose && <ActionIcon variant="subtle" onClick={onClose} aria-label="收起面板（不会取消任务）"><Icon name="close" size={18} /></ActionIcon>}
+      {onClose && <ActionIcon variant="subtle" color="gray" onClick={onClose} aria-label="收起面板（不会取消任务）"><Icon name="panel-collapse" size={18} /></ActionIcon>}
     </Group>
     <div><Text fw={600}>{subject}</Text><Text size="sm" c="dimmed">{scope}</Text><Text size="sm">{status}</Text></div>
     {children}

@@ -10,6 +10,8 @@ import {
   IconGitBranch,
   IconHome,
   IconMessageCircle,
+  IconLayoutSidebarRightCollapse,
+  IconLayoutSidebarRightExpand,
   IconPackage,
   IconPhone,
   IconPlayerPlay,
@@ -35,6 +37,7 @@ export type IconName =
   | 'home'
   | 'model'
   | 'nodes'
+  | 'panel-collapse' | 'panel-expand'
   | 'phone'
   | 'play'
   | 'plus'
@@ -68,6 +71,8 @@ const icons: Record<IconName, TablerIcon> = {
   home: IconHome,
   model: IconPackage,
   nodes: IconTimeline,
+  'panel-collapse': IconLayoutSidebarRightCollapse,
+  'panel-expand': IconLayoutSidebarRightExpand,
   phone: IconPhone,
   play: IconPlayerPlay,
   plus: IconPlus,

@@ -10,7 +10,7 @@ vi.mock('../world/V3ProfileGrid', () => ({ V3ProfileGrid: () => <div>节点画�
 vi.mock('../world/PersonWorldRevisionPanel', () => ({ PersonWorldRevisionPanel: () => null }))
 afterEach(() => { cleanup(); sessionStorage.clear(); vi.unstubAllGlobals() })
 
-test('编译、审核、明确批准后即可创建分支', async () => {
+test('编译、审核后一键开始对话：自动发布并建立分支进入对话', async () => {
   let published = false
   const calls: { url: string; body: Record<string, unknown> }[] = []
   vi.stubGlobal('fetch', vi.fn(async (input, options) => {
@@ -30,17 +30,16 @@ test('编译、审核、明确批准后即可创建分支', async () => {
   render(<TestThemeProvider><QueryClientProvider client={client}><MemoryRouter initialEntries={['/start']}><Routes>
     <Route path="/start" element={<NodeCompilationPanel projectId="p" investigationId="inv" graphId="g" previewHash="boundary" />} />
     <Route path="/projects/:projectId/node-profiles/:profileId" element={<NodeProfilePage />} />
-    <Route path="/projects/p/branches/branch/preparing" element={<div>分支准备中</div>} />
+    <Route path="/projects/p/branches/branch" element={<div>分支对话页</div>} />
   </Routes></MemoryRouter></QueryClientProvider></TestThemeProvider>)
   await waitFor(() => expect(screen.getByRole('button', { name: '整理此刻的人物背景' })).not.toBeDisabled())
   fireEvent.click(screen.getByRole('button', { name: '整理此刻的人物背景' }))
   fireEvent.click(await screen.findByRole('button', { name: '审核节点背景' }))
   await screen.findByText('节点画像内容')
+  expect(screen.queryByRole('button', { name: '确认并发布这个版本' })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: '准备分支' })).not.toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: '确认并发布这个版本' }))
-  fireEvent.click(await screen.findByRole('button', { name: '准备分支' }))
-  fireEvent.click(await screen.findByRole('button', { name: '创建并准备' }))
-  await screen.findByText('分支已创建')
+  fireEvent.click(screen.getByRole('button', { name: '开始对话' }))
+  await screen.findByText('分支对话页')
   expect(calls.find(c => c.url.endsWith('/branches'))?.body).toMatchObject({
     publication_id: 'pub', investigation_id: 'inv', preview_hash: 'boundary',
   })
