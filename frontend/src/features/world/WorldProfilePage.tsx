@@ -1,6 +1,7 @@
 import { userMessage } from '../../components/feedback/messages'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  ActionIcon,
   Alert,
   Badge,
   Button,
@@ -12,6 +13,7 @@ import {
   Stack,
   Text,
   Title,
+  Tooltip,
 } from '@mantine/core'
 import { useEffect, useState } from 'react'
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
@@ -31,6 +33,7 @@ import type {
   InvestigationReport,
   PhoenixAgentExecutionSummary,
   ProfileStatementSelection,
+  WorldProfileFields,
   SectionTaskAudit,
   SourcedStatement,
   SourceStatus,
@@ -67,7 +70,6 @@ export function WorldProfilePage() {
   const journey = useJourney(projectId ?? '')
   const queryClient = useQueryClient()
   const [correctionOpen, setCorrectionOpen] = useState(false)
-  const [editing, setEditing] = useState(false)
   const [selections, setSelections] = useState<ProfileStatementSelection[]>([])
   const [selectionLocked, setSelectionLocked] = useState(false)
   const [sectionRetry, setSectionRetry] = useState<{ jobId: string, section: string } | null>(null)
@@ -75,15 +77,11 @@ export function WorldProfilePage() {
   useEffect(() => {
     if (projectId && (viewParams.get('revision') || window.localStorage.getItem(`moonlightbox:person-world-revision:${projectId}`))) {
       setCorrectionOpen(true)
-      setEditing(true)
     }
   }, [projectId, viewParams])
 
-  const openNewCorrection = () => {
-    // 返回阅读不清空选项；取消修订由会话面板负责。
-    setEditing(true)
-    setCorrectionOpen(true)
-  }
+  // 关闭面板不清空选项；取消修订由会话面板负责。
+  const openNewCorrection = () => setCorrectionOpen(true)
   const reopenCorrection = openNewCorrection
   const toggleSelection = (selection: ProfileStatementSelection) => {
     if (selectionLocked) return
@@ -222,8 +220,6 @@ export function WorldProfilePage() {
           {journey.data?.publication && <Button component={Link} variant="light" mb="md" to={`/projects/${projectId}/world?view=published`}>查看当前已发布背景（不影响新草稿）</Button>}
           <CandidateProfileReview
             correctionOpen={correctionOpen}
-            editing={editing}
-            onRead={() => { setEditing(false); setCorrectionOpen(false) }}
             draft={draft.data}
             phoenixSummaryBySection={phoenixSummaryBySection}
             approving={approveDraft.isPending}
@@ -243,9 +239,6 @@ export function WorldProfilePage() {
             onRetrySection={(section) => retrySection.mutate(section)}
             onRegenerate={() => recompile.mutate()}
             regenerating={recompile.isPending}
-            correctionLabel={selections.length || selectionLocked
-              ? '打开纠正工作区'
-              : '指出问题或补充事实'}
             onNewCorrection={selections.length || selectionLocked
               ? reopenCorrection
               : openNewCorrection}
@@ -268,13 +261,6 @@ export function WorldProfilePage() {
   // 已发布档案与正在构建的候选图可以短暂并存。候选流程是用户此刻操作的对象，
   // 不能因为 profile API 仍正确返回上一份已发布档案，就把构建/别名审核界面遮住。
   const workflowStatus = graphStatus.data?.status
-  const workflowActive = [
-    'building',
-    'awaiting_alias_review',
-    'profile_compilation_queued',
-    'compiling_profile',
-    'awaiting_profile_review',
-  ].includes(workflowStatus ?? '')
   if (!publishedView && workflowStatus === 'awaiting_alias_review') {
     return <StageHandoff title="先确认人物与资料" detail="这些名字是否指同一个人，需要在人物资料页确认；已有发布背景保持可读。" to={`/projects/${projectId}/setup/participants`} label="查看待确认名字" />
   }
@@ -304,17 +290,21 @@ export function WorldProfilePage() {
         <SectionNav items={worldNav} label="世界" />
         <PageHeader
           title="人物背景"
-          description={editing ? '选择需要修改的内容，在侧栏说明。' : '人物理解与生活背景'}
+          description="点击内容勾选，在侧栏告诉 Agent 怎么改"
           action={<Group>
-            {editing && <Button variant="subtle" color="gray" leftSection={<Icon name="back" size={16} />} onClick={() => { setEditing(false); setCorrectionOpen(false) }}>返回阅读</Button>}
-            {!correctionOpen && <Button
-              variant="light"
-              onClick={selections.length || selectionLocked
-                ? reopenCorrection
-                : openNewCorrection}
-            >
-              {editing ? '打开修订对话' : '修改背景'}
-            </Button>}
+            {!correctionOpen && <Tooltip label="展开对话框">
+              <ActionIcon
+                aria-label="展开对话框"
+                color="gray"
+                size="lg"
+                variant="subtle"
+                onClick={selections.length || selectionLocked
+                  ? reopenCorrection
+                  : openNewCorrection}
+              >
+                <Icon name="panel-expand" size={18} />
+              </ActionIcon>
+            </Tooltip>}
             <Badge color="green" size="lg" variant="light">
               {data.graph.bundle_count} 个会话窗口 · {data.graph.message_count} 条消息
             </Badge>
@@ -337,11 +327,10 @@ export function WorldProfilePage() {
         ) : null}
 
         {journey.data?.publication && !journey.data.branches.length && <Alert color="teal">人物背景已发布。</Alert>}
-        {publishedView && workflowActive && <Button component={Link} variant="subtle" color="gray" leftSection={<Icon name="back" size={16} />} to={`/projects/${projectId}/setup/graph`}>返回图谱构建进度</Button>}
         <details><summary>调查状态与版本管理</summary><InvestigationOverview report={data.investigation_report} /><Button mt="sm" loading={recompile.isPending} variant="subtle" onClick={() => recompile.mutate()}>重新生成背景</Button></details>
 
         {data.profile_schema_version === 'v3' ? (
-          <V3ProfileGrid editing={editing} projectId={projectId} profile={data.profile_v3 ?? {}} locked={selectionLocked} selectedKeys={selectedKeys} onToggle={toggleSelection} />
+          <V3ProfileGrid editing projectId={projectId} profile={data.profile_v3 ?? {}} locked={selectionLocked} selectedKeys={selectedKeys} onToggle={toggleSelection} />
         ) : data.profile_schema_version === 'v2' ? (
           <V2ProfileGrid
             profile={data.profile_v2}
@@ -350,128 +339,10 @@ export function WorldProfilePage() {
             onToggle={toggleSelection}
           />
         ) : (
-        <SimpleGrid cols={{ base: 1, md: 2 }}>
-          <ProfileSection
-            items={[
-              ...profileEntries('identity.names', '身份与称呼', data.identity.names),
-              ...profileEntries('identity.aliases', '身份与称呼', data.identity.aliases),
-              ...profileEntries(
-                'identity.self_descriptions',
-                '身份与称呼',
-                data.identity.self_descriptions,
-              ),
-              ...profileEntries('identity.roles', '身份与称呼', data.identity.roles),
-            ]}
-            locked={selectionLocked}
-            selectedKeys={selectedKeys}
-            title="身份与称呼"
-            onToggle={toggleSelection}
-          />
-          <ProfileSection
-            items={profileEntries('work_and_education', '工作与教育', data.work_and_education)}
-            locked={selectionLocked}
-            selectedKeys={selectedKeys}
-            title="工作与教育"
-            onToggle={toggleSelection}
-          />
-          <ProfileSection
-            items={profileEntries('social_relationships', '社会关系', data.social_relationships)}
-            locked={selectionLocked}
-            selectedKeys={selectedKeys}
-            title="社会关系"
-            onToggle={toggleSelection}
-          />
-          <ProfileSection
-            items={profileEntries('places', '个人地点', data.places)}
-            locked={selectionLocked}
-            selectedKeys={selectedKeys}
-            title="个人地点"
-            onToggle={toggleSelection}
-          />
-          <ProfileSection
-            items={profileEntries('preferences', '兴趣与偏好', data.preferences)}
-            locked={selectionLocked}
-            selectedKeys={selectedKeys}
-            title="兴趣与偏好"
-            onToggle={toggleSelection}
-          />
-          <ProfileSection
-            items={profileEntries('recurring_activities', '长期活动', data.recurring_activities)}
-            locked={selectionLocked}
-            selectedKeys={selectedKeys}
-            title="长期活动"
-            onToggle={toggleSelection}
-          />
-          <ProfileSection
-            items={[
-              ...profileEntries(
-                'routine_summary.workdays',
-                '生活规律',
-                data.routine_summary.workdays,
-              ),
-              ...profileEntries(
-                'routine_summary.weekends',
-                '生活规律',
-                data.routine_summary.weekends,
-              ),
-              ...profileEntries(
-                'routine_summary.other_patterns',
-                '生活规律',
-                data.routine_summary.other_patterns,
-              ),
-            ]}
-            locked={selectionLocked}
-            selectedKeys={selectedKeys}
-            title="生活规律"
-            onToggle={toggleSelection}
-          />
-          <ProfileSection
-            items={profileEntries('life_phases', '生活阶段', data.life_phases)}
-            locked={selectionLocked}
-            selectedKeys={selectedKeys}
-            title="生活阶段"
-            onToggle={toggleSelection}
-          />
-          <ProfileSection
-            items={[
-              ...profileEntries(
-                'relationship_with_user.overview',
-                '与用户的关系',
-                data.relationship_with_user.overview,
-              ),
-              ...profileEntries(
-                'relationship_with_user.changes_over_time',
-                '与用户的关系',
-                data.relationship_with_user.changes_over_time,
-              ),
-            ]}
-            locked={selectionLocked}
-            selectedKeys={selectedKeys}
-            title="与用户的关系"
-            onToggle={toggleSelection}
-          />
-          <ProfileSection
-            items={profileEntries('important_events', '重要经历', data.important_events)}
-            locked={selectionLocked}
-            selectedKeys={selectedKeys}
-            title="重要经历"
-            onToggle={toggleSelection}
-          />
-        </SimpleGrid>
+          <LegacyProfileGrid data={data} locked={selectionLocked} selectedKeys={selectedKeys} onToggle={toggleSelection} />
         )}
-
-        {data.profile_schema_version !== 'v2' && data.unresolved_candidates.length ? (
-          <ProfileSection
-            items={profileEntries(
-              'unresolved_candidates',
-              '尚未消歧的候选',
-              data.unresolved_candidates,
-            )}
-            locked={selectionLocked}
-            selectedKeys={selectedKeys}
-            title="尚未消歧的候选"
-            onToggle={toggleSelection}
-          />
+        {data.profile_schema_version !== 'v2' ? (
+          <UnresolvedCandidatesSection data={data} locked={selectionLocked} selectedKeys={selectedKeys} onToggle={toggleSelection} />
         ) : null}
       </Stack>
       <PersonWorldRevisionPanel
@@ -496,7 +367,6 @@ function CandidateProfileReview({
   locked,
   selectedKeys,
   retryingSection,
-  correctionLabel,
   correctionOpen,
   onApprove,
   onRetrySection,
@@ -504,11 +374,7 @@ function CandidateProfileReview({
   regenerating,
   onNewCorrection,
   onToggle,
-  editing,
-  onRead,
 }: {
-  editing: boolean
-  onRead: () => void
   draft: WorldProfileDraftRead
   phoenixSummaryBySection: ReadonlyMap<string, PhoenixAgentExecutionSummary>
   approving: boolean
@@ -516,7 +382,6 @@ function CandidateProfileReview({
   locked: boolean
   selectedKeys: Set<string>
   retryingSection: string | null
-  correctionLabel: string
   correctionOpen: boolean
   onApprove: () => void
   onRetrySection: (section: string) => void
@@ -547,8 +412,11 @@ function CandidateProfileReview({
           </Text>
         </div>
         <Group>
-          {editing && <Button variant="subtle" color="gray" leftSection={<Icon name="back" size={16} />} onClick={onRead}>返回阅读</Button>}
-          {!correctionOpen && <Button variant="light" onClick={onNewCorrection}>{correctionLabel}</Button>}
+          {!correctionOpen && <Tooltip label="展开对话框">
+            <ActionIcon aria-label="展开对话框" color="gray" size="lg" variant="subtle" onClick={onNewCorrection}>
+              <Icon name="panel-expand" size={18} />
+            </ActionIcon>
+          </Tooltip>}
           {data.profile_schema_version !== 'v3' ? (
             <Button loading={regenerating} onClick={onRegenerate}>重新生成 v3 画像</Button>
           ) : null}
@@ -569,7 +437,7 @@ function CandidateProfileReview({
         onRetrySection={data.profile_schema_version === 'v3' ? onRetrySection : undefined}
       /></details>
       {data.profile_schema_version === 'v3' ? (
-        <V3ProfileGrid editing={editing} projectId={projectId} profile={data.profile_v3 ?? {}} locked={locked} selectedKeys={selectedKeys} onToggle={onToggle} />
+        <V3ProfileGrid editing projectId={projectId} profile={data.profile_v3 ?? {}} locked={locked} selectedKeys={selectedKeys} onToggle={onToggle} />
       ) : data.profile_schema_version === 'v2' ? (
         <V2ProfileGrid
           profile={data.profile_v2}
@@ -578,129 +446,163 @@ function CandidateProfileReview({
           onToggle={onToggle}
         />
       ) : (
-      <SimpleGrid cols={{ base: 1, md: 2 }}>
-        <ProfileSection
-          items={[
-            ...profileEntries('identity.names', '身份与称呼', data.identity.names),
-            ...profileEntries('identity.aliases', '身份与称呼', data.identity.aliases),
-            ...profileEntries(
-              'identity.self_descriptions',
-              '身份与称呼',
-              data.identity.self_descriptions,
-            ),
-            ...profileEntries('identity.roles', '身份与称呼', data.identity.roles),
-          ]}
-          locked={locked}
-          selectedKeys={selectedKeys}
-          title="身份与称呼"
-          onToggle={onToggle}
-        />
-        <ProfileSection
-          items={profileEntries('work_and_education', '工作与教育', data.work_and_education)}
-          locked={locked}
-          selectedKeys={selectedKeys}
-          title="工作与教育"
-          onToggle={onToggle}
-        />
-        <ProfileSection
-          items={profileEntries('social_relationships', '社会关系', data.social_relationships)}
-          locked={locked}
-          selectedKeys={selectedKeys}
-          title="社会关系"
-          onToggle={onToggle}
-        />
-        <ProfileSection
-          items={profileEntries('places', '个人地点', data.places)}
-          locked={locked}
-          selectedKeys={selectedKeys}
-          title="个人地点"
-          onToggle={onToggle}
-        />
-        <ProfileSection
-          items={profileEntries('preferences', '兴趣与偏好', data.preferences)}
-          locked={locked}
-          selectedKeys={selectedKeys}
-          title="兴趣与偏好"
-          onToggle={onToggle}
-        />
-        <ProfileSection
-          items={profileEntries('recurring_activities', '长期活动', data.recurring_activities)}
-          locked={locked}
-          selectedKeys={selectedKeys}
-          title="长期活动"
-          onToggle={onToggle}
-        />
-        <ProfileSection
-          items={[
-            ...profileEntries(
-              'routine_summary.workdays',
-              '生活规律',
-              data.routine_summary.workdays,
-            ),
-            ...profileEntries(
-              'routine_summary.weekends',
-              '生活规律',
-              data.routine_summary.weekends,
-            ),
-            ...profileEntries(
-              'routine_summary.other_patterns',
-              '生活规律',
-              data.routine_summary.other_patterns,
-            ),
-          ]}
-          locked={locked}
-          selectedKeys={selectedKeys}
-          title="生活规律"
-          onToggle={onToggle}
-        />
-        <ProfileSection
-          items={profileEntries('life_phases', '生活阶段', data.life_phases)}
-          locked={locked}
-          selectedKeys={selectedKeys}
-          title="生活阶段"
-          onToggle={onToggle}
-        />
-        <ProfileSection
-          items={[
-            ...profileEntries(
-              'relationship_with_user.overview',
-              '与用户的关系',
-              data.relationship_with_user.overview,
-            ),
-            ...profileEntries(
-              'relationship_with_user.changes_over_time',
-              '与用户的关系',
-              data.relationship_with_user.changes_over_time,
-            ),
-          ]}
-          locked={locked}
-          selectedKeys={selectedKeys}
-          title="与用户的关系"
-          onToggle={onToggle}
-        />
-        <ProfileSection
-          items={profileEntries('important_events', '重要经历', data.important_events)}
-          locked={locked}
-          selectedKeys={selectedKeys}
-          title="重要经历"
-          onToggle={onToggle}
-        />
-      </SimpleGrid>
+        <LegacyProfileGrid data={data} locked={locked} selectedKeys={selectedKeys} onToggle={onToggle} />
       )}
-      {data.profile_schema_version !== 'v2' && data.unresolved_candidates.length ? (
-        <ProfileSection
-          items={profileEntries(
-            'unresolved_candidates',
-            '尚未消歧的候选',
-            data.unresolved_candidates,
-          )}
-          locked={locked}
-          selectedKeys={selectedKeys}
-          title="尚未消歧的候选"
-          onToggle={onToggle}
-        />
+      {data.profile_schema_version !== 'v2' ? (
+        <UnresolvedCandidatesSection data={data} locked={locked} selectedKeys={selectedKeys} onToggle={onToggle} />
       ) : null}
     </Stack>
+  )
+}
+
+// 旧版（v1）背景栅格。主视图与候选审核页共用同一份实现，不再各存一份。
+function LegacyProfileGrid({
+  data,
+  locked,
+  selectedKeys,
+  onToggle,
+}: {
+  data: WorldProfileFields
+  locked: boolean
+  selectedKeys: Set<string>
+  onToggle: (selection: ProfileStatementSelection) => void
+}) {
+  return (
+    <SimpleGrid cols={{ base: 1, md: 2 }}>
+      <ProfileSection
+        items={[
+          ...profileEntries('identity.names', '身份与称呼', data.identity.names),
+          ...profileEntries('identity.aliases', '身份与称呼', data.identity.aliases),
+          ...profileEntries(
+            'identity.self_descriptions',
+            '身份与称呼',
+            data.identity.self_descriptions,
+          ),
+          ...profileEntries('identity.roles', '身份与称呼', data.identity.roles),
+        ]}
+        locked={locked}
+        selectedKeys={selectedKeys}
+        title="身份与称呼"
+        onToggle={onToggle}
+      />
+      <ProfileSection
+        items={profileEntries('work_and_education', '工作与教育', data.work_and_education)}
+        locked={locked}
+        selectedKeys={selectedKeys}
+        title="工作与教育"
+        onToggle={onToggle}
+      />
+      <ProfileSection
+        items={profileEntries('social_relationships', '社会关系', data.social_relationships)}
+        locked={locked}
+        selectedKeys={selectedKeys}
+        title="社会关系"
+        onToggle={onToggle}
+      />
+      <ProfileSection
+        items={profileEntries('places', '个人地点', data.places)}
+        locked={locked}
+        selectedKeys={selectedKeys}
+        title="个人地点"
+        onToggle={onToggle}
+      />
+      <ProfileSection
+        items={profileEntries('preferences', '兴趣与偏好', data.preferences)}
+        locked={locked}
+        selectedKeys={selectedKeys}
+        title="兴趣与偏好"
+        onToggle={onToggle}
+      />
+      <ProfileSection
+        items={profileEntries('recurring_activities', '长期活动', data.recurring_activities)}
+        locked={locked}
+        selectedKeys={selectedKeys}
+        title="长期活动"
+        onToggle={onToggle}
+      />
+      <ProfileSection
+        items={[
+          ...profileEntries(
+            'routine_summary.workdays',
+            '生活规律',
+            data.routine_summary.workdays,
+          ),
+          ...profileEntries(
+            'routine_summary.weekends',
+            '生活规律',
+            data.routine_summary.weekends,
+          ),
+          ...profileEntries(
+            'routine_summary.other_patterns',
+            '生活规律',
+            data.routine_summary.other_patterns,
+          ),
+        ]}
+        locked={locked}
+        selectedKeys={selectedKeys}
+        title="生活规律"
+        onToggle={onToggle}
+      />
+      <ProfileSection
+        items={profileEntries('life_phases', '生活阶段', data.life_phases)}
+        locked={locked}
+        selectedKeys={selectedKeys}
+        title="生活阶段"
+        onToggle={onToggle}
+      />
+      <ProfileSection
+        items={[
+          ...profileEntries(
+            'relationship_with_user.overview',
+            '与用户的关系',
+            data.relationship_with_user.overview,
+          ),
+          ...profileEntries(
+            'relationship_with_user.changes_over_time',
+            '与用户的关系',
+            data.relationship_with_user.changes_over_time,
+          ),
+        ]}
+        locked={locked}
+        selectedKeys={selectedKeys}
+        title="与用户的关系"
+        onToggle={onToggle}
+      />
+      <ProfileSection
+        items={profileEntries('important_events', '重要经历', data.important_events)}
+        locked={locked}
+        selectedKeys={selectedKeys}
+        title="重要经历"
+        onToggle={onToggle}
+      />
+    </SimpleGrid>
+  )
+}
+
+function UnresolvedCandidatesSection({
+  data,
+  locked,
+  selectedKeys,
+  onToggle,
+}: {
+  data: WorldProfileFields
+  locked: boolean
+  selectedKeys: Set<string>
+  onToggle: (selection: ProfileStatementSelection) => void
+}) {
+  if (!data.unresolved_candidates.length) return null
+  return (
+    <ProfileSection
+      items={profileEntries(
+        'unresolved_candidates',
+        '尚未消歧的候选',
+        data.unresolved_candidates,
+      )}
+      locked={locked}
+      selectedKeys={selectedKeys}
+      title="尚未消歧的候选"
+      onToggle={onToggle}
+    />
   )
 }
 
