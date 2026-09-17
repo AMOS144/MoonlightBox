@@ -86,22 +86,6 @@ export function WorldGraphPage() {
           <WorldGraphView projectId={projectId} building={building} />
         </Suspense>
       ) : null}
-      {status === 'awaiting_profile_review' ? (
-        <StageHandoff
-          title="图谱已建立"
-          detail="人物背景已基于这份图谱整理完成，等待你审阅。"
-          to={`/projects/${projectId}/world`}
-          label="审阅人物背景"
-        />
-      ) : null}
-      {status === 'ready' ? (
-        <StageHandoff
-          title="图谱已建立"
-          detail="人物背景与起点调查都基于这份图谱。"
-          to={`/projects/${projectId}/world`}
-          label="查看人物背景"
-        />
-      ) : null}
     </Stack>
   )
 }
