@@ -18,6 +18,7 @@ import {
   IconPhone,
   IconPlayerPlay,
   IconPlus,
+  IconQuote,
   IconSend,
   IconTimeline,
   IconX,
@@ -43,6 +44,7 @@ export type IconName =
   | 'phone'
   | 'play'
   | 'plus'
+  | 'quote'
   | 'send'
   | 'select' | 'selected'
   | 'timeline'
@@ -79,6 +81,7 @@ const icons: Record<IconName, TablerIcon> = {
   phone: IconPhone,
   play: IconPlayerPlay,
   plus: IconPlus,
+  quote: IconQuote,
   send: IconSend,
   select: IconCircle,
   selected: IconCircleCheckFilled,

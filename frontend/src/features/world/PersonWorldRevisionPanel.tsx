@@ -1,5 +1,5 @@
 import { userMessage } from '../../components/feedback/messages'
-import { Alert, Badge, Button, Divider, Drawer, Group, Paper, Progress, ScrollArea, Stack, Text, Textarea, Title } from '@mantine/core'
+import { Alert, Badge, Button, Divider, Drawer, Group, Paper, Pill, Progress, ScrollArea, Stack, Text, Textarea, Title, Tooltip } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Icon } from '../../components/Icon'
@@ -48,7 +48,6 @@ export function PersonWorldRevisionPanel({
   const [sseUnavailable, setSseUnavailable] = useState(false)
   const createRequestKey = useRef(newRequestKey())
   const replyRequestKey = useRef(newRequestKey())
-  const selectionKey = selections.map((item) => item.key).join('|')
 
   useEffect(() => {
     const stored = requestedSession || window.localStorage.getItem(storageKey)
@@ -59,12 +58,6 @@ export function PersonWorldRevisionPanel({
     if (sessionId) window.localStorage.setItem(storageKey, sessionId)
     else window.localStorage.removeItem(storageKey)
   }, [sessionId, storageKey])
-
-  useEffect(() => {
-    if (!sessionId) setMessage(previous => previous || initialMessage(selections))
-    // selections 由稳定 key 表示；避免仅因数组引用变化覆盖用户输入。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectionKey, sessionId])
 
   const revision = useQuery({
     queryKey: ['person-world-revision', projectId, sessionId],
@@ -336,12 +329,6 @@ export function PersonWorldRevisionPanel({
 
       <ScrollArea className="person-world-agent-panel__body">
         <Stack gap="md" p="md">
-          <SelectionContext
-            selections={selections}
-            storedSelections={current?.selected_statements ?? []}
-            locked={locked}
-          />
-
           {current ? (
             <Stack gap="xs">
               <Group justify="space-between">
@@ -518,6 +505,24 @@ export function PersonWorldRevisionPanel({
       <div className="person-world-agent-panel__footer">
         {showComposer ? (
           <Stack gap="xs">
+            {selections.length ? (
+              <Pill.Group aria-label="已选核对范围">
+                {selections.map((item) => (
+                  <Tooltip key={item.key} label={item.statement.text} multiline maw={320}>
+                    <Pill
+                      withRemoveButton={!locked}
+                      onRemove={() => onRestoreSelections(selections.filter((entry) => entry.key !== item.key))}
+                      removeButtonProps={{ 'aria-label': `移除${item.label ?? item.sectionLabel}` }}
+                    >
+                      <Group gap={4} wrap="nowrap">
+                        <Icon name="quote" size={12} />
+                        {item.label ?? item.sectionLabel}
+                      </Group>
+                    </Pill>
+                  </Tooltip>
+                ))}
+              </Pill.Group>
+            ) : null}
             <Textarea
               disabled={busy}
               autosize
@@ -530,7 +535,7 @@ export function PersonWorldRevisionPanel({
               onChange={(event) => setMessage(event.currentTarget.value)}
             />
             <Button
-              disabled={busy || !message.trim()}
+              disabled={busy || (!message.trim() && !selections.length)}
               loading={create.isPending || reply.isPending}
               onClick={() => sessionId ? reply.mutate() : create.mutate()}
             >
@@ -581,48 +586,6 @@ export function PersonWorldRevisionPanel({
   )
   // 窄屏用标准抽屉管理焦点、Esc 和遮罩，关闭不取消服务端修订。
   return narrow ? <Drawer opened={opened} onClose={onClose} position="right" size="md" title="修改人物背景" className="profile-revision-drawer">{panel}</Drawer> : panel
-}
-
-function SelectionContext({
-  selections,
-  storedSelections,
-  locked,
-}: {
-  selections: ProfileStatementSelection[]
-  storedSelections: WorldRevision['selected_statements']
-  locked: boolean
-}) {
-  const selected = selections.length
-    ? selections.map((item) => ({
-      key: item.key,
-      sectionLabel: item.sectionLabel,
-      text: item.statement.text,
-    }))
-    : storedSelections.map((item, index) => ({
-      key: `${item.section}:${index}:${item.text}`,
-      sectionLabel: item.section_label,
-      text: item.text,
-    }))
-  return (
-    <Paper bg="dark.7" p="sm" withBorder>
-      <Group justify="space-between">
-        <Text fw={700} size="xs">本轮核对范围</Text>
-        {locked ? <Badge color="gray" size="xs">已锁定</Badge> : null}
-      </Group>
-      {selected.length ? (
-        <Stack gap={5} mt="xs">
-          {selected.map((item) => (
-            <Text key={item.key} lineClamp={2} size="xs">
-              <Text c="moon.4" component="span" inherit>{item.sectionLabel} · </Text>
-              {item.text}
-            </Text>
-          ))}
-        </Stack>
-      ) : (
-        <Text c="dimmed" mt={4} size="xs">未绑定陈述：本轮用于补充缺失事实。</Text>
-      )}
-    </Paper>
-  )
 }
 
 type QuestionTurnPayload = {
@@ -1038,15 +1001,6 @@ function beginRevision(
 ) {
   setMessage('需要调整的是：')
   setIsRevising(true)
-}
-
-function initialMessage(selections: ProfileStatementSelection[]) {
-  if (!selections.length) return ''
-  return [
-    '我想核对以下人物档案结论：',
-    ...selections.map((item) => `- [${item.sectionLabel}] ${item.statement.text}`),
-    '请先结合原始聊天逐条确认我的修改意图，不要直接改图谱。',
-  ].join('\n')
 }
 
 function newRequestKey() {

@@ -35,7 +35,7 @@ export function V3ProfileGrid({ projectId, profile, locked, selectedKeys, onTogg
     const key = `v3:${section}:${moduleId ?? id}:${path}`
     const body = text(item.description) || text(item.summary) || text(item.value)
     return {
-      key, section, sectionLabel: name, entry_id: id || undefined, module_id: moduleId, field_path: path,
+      key, section, sectionLabel: name, label: name, entry_id: id || undefined, module_id: moduleId, field_path: path,
       statement: { text: body || name, source_status: item.basis === 'user_corrected' ? 'human_corrected' : 'inferred', source_document_ids: [], source_message_ids: list(item.reference_message_ids).map(String) },
     }
   }

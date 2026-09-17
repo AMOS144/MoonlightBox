@@ -16,6 +16,8 @@ export type ProfileStatementSelection = {
   key: string
   section: string
   sectionLabel: string
+  /** 字段显示名（如"姓名与自称"），用于 chip 展示；旧会话恢复的条目可能没有。 */
+  label?: string
   statement: SourcedStatement
   entry_id?: string
   module_id?: string
