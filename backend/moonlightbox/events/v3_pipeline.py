@@ -17,7 +17,7 @@ from moonlightbox.events.pipeline import (
     PipelineCancelledError,
     PipelineExecutionError,
     PipelineResult,
-    _safe_failure,
+    safe_failure,
 )
 from moonlightbox.events.runs import (
     AnalysisRunLeaseLostError,
@@ -309,7 +309,7 @@ class EventV3Pipeline:
             self._interrupt_run(run.id, lease_token=lease.token)
             raise
         except Exception as error:
-            failure = _safe_failure(error)
+            failure = safe_failure(error)
             self._mark_failed(run.id, failure.category, failure.persisted_message, lease.token)
             raise PipelineExecutionError(failure.public_message) from error
 

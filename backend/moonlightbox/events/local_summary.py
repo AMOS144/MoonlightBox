@@ -128,7 +128,7 @@ class MlxEventNarrativeSummarizer:
                 ],
                 verbose=False,
             )
-            summary = _clean_summary(raw)
+            summary = clean_summary(raw)
             if len(summary) >= 20:
                 return summary
         raise LocalSummaryError("本地模型生成的回忆摘要过短")
@@ -150,7 +150,7 @@ class MlxEventNarrativeSummarizer:
             raise LocalSummaryError("无法加载本地节点摘要模型") from error
 
 
-def _clean_summary(raw: str) -> str:
+def clean_summary(raw: str) -> str:
     without_thinking = re.sub(
         r"<think>[\s\S]*?</think>",
         "",

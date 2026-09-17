@@ -266,7 +266,7 @@ class EventV2Pipeline:
             self._interrupt_run(run.id, lease_token=lease.token)
             raise
         except Exception as error:
-            failure = _safe_failure(error)
+            failure = safe_failure(error)
             self._mark_failed(run.id, failure, lease_token=lease.token)
             raise PipelineExecutionError(failure.public_message) from error
 
@@ -597,7 +597,7 @@ def _unique_candidates(
     return tuple(by_key[key] for key in sorted(by_key))
 
 
-def _safe_failure(error: Exception) -> _SafeFailure:
+def safe_failure(error: Exception) -> _SafeFailure:
     if isinstance(error, NodeAnalysisCloudError):
         allowed_diagnostic = {
             key: value

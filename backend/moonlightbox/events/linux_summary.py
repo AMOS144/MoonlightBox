@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from moonlightbox.agent.linux_inference import SharedLinuxModelRuntime
-from moonlightbox.events.local_summary import LocalSummaryError, _clean_summary
+from moonlightbox.events.local_summary import LocalSummaryError, clean_summary
 from moonlightbox.events.normalization import NormalizedMessage
 from moonlightbox.events.v3_ranking import V3RankedCandidate
 
@@ -45,7 +45,7 @@ class LinuxEventNarrativeSummarizer:
                 ],
                 max_tokens=240,
             )
-            summary = _clean_summary(raw)
+            summary = clean_summary(raw)
             if len(summary) >= 20:
                 return summary
             if attempt == 0:

@@ -121,7 +121,7 @@ def build_source_message_tools(
             rank = int(item.get("reference_rank", index + 1))
             references_by_document.setdefault(name, []).append((chunk, rank))
         for bundle in bundles:
-            rows = _bundle_rows(session, bundle.id)
+            rows = bundle_rows(session, bundle.id)
             document_references = references_by_document.get(bundle.source_name, [])
             exact_refs = [
                 ref
@@ -138,7 +138,7 @@ def build_source_message_tools(
                     if message.id in exact_messages
                 }
                 if exact_refs
-                else _matching_indexes(rows, [chunk for chunk, _ in document_references])
+                else matching_indexes(rows, [chunk for chunk, _ in document_references])
             )
             # 某些 LightRAG 存储只返回 file_path，不返回 chunk。此时读取该
             # Bundle 的完整受限窗口，宁可交给栏目提取 Agent 判断，也不做关键词猜测。
@@ -220,7 +220,7 @@ def build_source_message_tools(
             bundle = session.get(ConversationBundle, bundle_id)
             if bundle is None:
                 continue
-            rows = _bundle_rows(session, bundle_id)
+            rows = bundle_rows(session, bundle_id)
             primary = {
                 index for index, (_, message, _) in enumerate(rows) if message.id in requested
             }
@@ -279,7 +279,7 @@ def build_source_message_tools(
     }
 
 
-def _bundle_rows(
+def bundle_rows(
     session: Session, bundle_id: str
 ) -> list[tuple[ConversationBundleMessage, Message, Participant]]:
     return [
@@ -315,7 +315,7 @@ def _record_located_messages(
     }
 
 
-def _matching_indexes(
+def matching_indexes(
     rows: list[tuple[ConversationBundleMessage, Message, Participant]],
     chunk_contents: list[str],
 ) -> set[int]:

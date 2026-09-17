@@ -99,7 +99,7 @@ def test_worker_uses_same_graph_and_persists_draft_receipt():
             return_value=scope,
         ),
         patch(
-            "moonlightbox.world.person_world.node_jobs._participant_names",
+            "moonlightbox.world.person_world.node_jobs.participant_names",
             return_value=("目标", "t", "用户"),
         ),
         patch("moonlightbox.world.person_world.node_jobs.PersonWorldCoordinatorV3") as coordinator,

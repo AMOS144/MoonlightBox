@@ -11,7 +11,7 @@ from moonlightbox.agent_runtime.tool_errors import ToolInputError, ToolServiceEr
 from moonlightbox.agent_runtime.tool_execution import serial
 from moonlightbox.world.models import ConversationBundle, WorldGraphVersion
 from moonlightbox.world.person_world.tools.graph_query import match_bundle_document_reference
-from moonlightbox.world.person_world.tools.source_messages import _bundle_rows, _matching_indexes
+from moonlightbox.world.person_world.tools.source_messages import bundle_rows, matching_indexes
 
 from .schemas import CandidateArgs, ContextArgs, EmptyArgs, ReadArgs, SearchArgs, WorkArgs
 from .store import activity, digest
@@ -191,13 +191,13 @@ class InvestigationTools:
                 name = match_bundle_document_reference(ref.file_path, set(by_name))
                 if name is None:
                     continue
-                bundle_rows = _bundle_rows(session, by_name[name].id)
-                hits = _matching_indexes(bundle_rows, [ref.content or ""])
+                rows = bundle_rows(session, by_name[name].id)
+                hits = matching_indexes(rows, [ref.content or ""])
                 # 不知道 chunk 对应哪条时明示返回 Bundle 开头，不伪称精确命中。
                 ids = (
-                    [bundle_rows[i][1].id for i in sorted(hits)]
+                    [rows[i][1].id for i in sorted(hits)]
                     if hits
-                    else [r[1].id for r in bundle_rows[:12]]
+                    else [r[1].id for r in rows[:12]]
                 )
                 ids = [i for i in ids if i in self.positions]
                 fragments.append(

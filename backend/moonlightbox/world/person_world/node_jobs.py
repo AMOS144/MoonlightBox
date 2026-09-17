@@ -11,7 +11,7 @@ from moonlightbox.world.client import LightRAGSidecarClient
 from moonlightbox.world.models import PersonWorldProfileDraft, WorldGraphVersion
 
 from .coordinator_v3 import PersonWorldCoordinatorV3
-from .jobs import _participant_names
+from .jobs import participant_names
 from .node_scope import NodeCompilationScope
 
 NODE_PROFILE_JOB_KIND = "person_world_node_compile_v1"
@@ -93,7 +93,7 @@ def create_node_compilation_handler(settings, *, compiler_client=None, lightrag_
                     timeout_seconds=settings.lightrag_timeout_seconds,
                 )
                 owned.append(sidecar)
-            target, target_id, user = _participant_names(service.session, graph.project_id)
+            target, target_id, user = participant_names(service.session, graph.project_id)
 
             def progress(stage, completed, total):
                 service.checkpoint(

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from moonlightbox.config import Settings
 from moonlightbox.jobs.models import Job
 from moonlightbox.jobs.service import JobService
-from moonlightbox.world.jobs import _enqueue_node_investigation
+from moonlightbox.world.jobs import enqueue_node_investigation
 from moonlightbox.world.models import (
     PersonWorldProfile,
     PersonWorldProfileDraft,
@@ -245,7 +245,7 @@ def enqueue_publication_analysis(
     """发布后进入节点调查工作台；不再启动历史 EventNode 评分。"""
 
     service = JobService(session)
-    return _enqueue_node_investigation(
+    return enqueue_node_investigation(
         service,
         project_id=graph.project_id,
     )

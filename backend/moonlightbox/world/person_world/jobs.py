@@ -23,7 +23,7 @@ from moonlightbox.world.client import (
     LightRAGSidecarError,
 )
 from moonlightbox.world.compiler import COMPILER_VERSION, CompiledWorldProfile
-from moonlightbox.world.jobs import LIGHTRAG_INDEX_BATCH_SIZE, _persist_profile
+from moonlightbox.world.jobs import LIGHTRAG_INDEX_BATCH_SIZE
 from moonlightbox.world.models import (
     ConversationBundle,
     ConversationBundleMessage,
@@ -35,6 +35,7 @@ from moonlightbox.world.models import (
     WorldGraphVersion,
     WorldPublication,
 )
+from moonlightbox.world.profile_store import persist_profile
 
 from .coordinator_v3 import PersonWorldCoordinatorV3 as PersonWorldCoordinator
 from .graph_executor import WorldGraphExecutor
@@ -234,7 +235,7 @@ def create_profile_recompile_handler(
                     max_output_tokens=settings.node_analysis_max_output_tokens,
                 )
                 compiler = owned_compiler
-            target_name, target_id, user_name = _participant_names(
+            target_name, target_id, user_name = participant_names(
                 service.session, candidate.project_id
             )
 
@@ -265,7 +266,7 @@ def create_profile_recompile_handler(
                 section_runtime_policy=section_policy(settings),
                 progress=report,
             ).run(mode="recompile", resume_key=f"job:{job.id}")
-            profile = _persist_profile(
+            profile = persist_profile(
                 service.session,
                 graph=candidate,
                 subject_person_id=target_id,
@@ -546,7 +547,7 @@ def create_graph_patch_handler(
                 token=token,
             )
 
-            subject_name, subject_person_id, user_name = _participant_names(
+            subject_name, subject_person_id, user_name = participant_names(
                 service.session, candidate.project_id
             )
 
@@ -600,7 +601,7 @@ def create_graph_patch_handler(
                 for value in item.get("source_message_ids", [])
                 if isinstance(value, str)
             ]
-            profile = _persist_profile(
+            profile = persist_profile(
                 service.session,
                 graph=candidate,
                 subject_person_id=subject_person_id,
@@ -878,7 +879,7 @@ def _clone_bundles(
     return output
 
 
-def _participant_names(session: Any, project_id: str) -> tuple[str, str, str]:
+def participant_names(session: Any, project_id: str) -> tuple[str, str, str]:
     from moonlightbox.imports.models import Message, Participant
 
     rows = list(

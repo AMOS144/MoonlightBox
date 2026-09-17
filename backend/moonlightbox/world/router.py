@@ -18,11 +18,11 @@ from moonlightbox.jobs.service import JobService
 from moonlightbox.world.client import LightRAGSidecarClient, LightRAGSidecarError
 from moonlightbox.world.jobs import (
     WORLD_BUILD_JOB_KIND,
-    _enqueue_node_investigation,
-    _persist_merge_proposals,
-    _required_participant,
+    enqueue_node_investigation,
     enqueue_world_build,
     load_world_messages,
+    persist_merge_proposals,
+    required_participant,
 )
 from moonlightbox.world.merges import AliasAgentMessage, generate_merge_candidates
 from moonlightbox.world.models import (
@@ -163,8 +163,8 @@ def create_world_router(database: Database, settings: Settings) -> APIRouter:
             session, project_id=project_id, import_ids=graph.source_import_ids
         )
         try:
-            subject = _required_participant(messages, role="target")
-            user = _required_participant(messages, role="self")
+            subject = required_participant(messages, role="target")
+            user = required_participant(messages, role="self")
         except Exception as error:
             raise HTTPException(status_code=409, detail="聊天中缺少目标人物或用户角色") from error
         sidecar = LightRAGSidecarClient(
@@ -230,7 +230,7 @@ def create_world_router(database: Database, settings: Settings) -> APIRouter:
                 old.decision = "reject"
                 old.review_note = "重新生成别名候选，旧提案作废。"
                 old.reviewed_at = datetime.now(UTC)
-            _persist_merge_proposals(
+            persist_merge_proposals(
                 session,
                 project_id=project_id,
                 graph=graph,
@@ -258,7 +258,7 @@ def create_world_router(database: Database, settings: Settings) -> APIRouter:
                 graph.completed_at = datetime.now(UTC)
                 graph.error_code = graph.error_message = None
                 session.commit()
-                _enqueue_node_investigation(JobService(session), project_id=project_id)
+                enqueue_node_investigation(JobService(session), project_id=project_id)
             else:
                 session.commit()
         finally:
@@ -410,7 +410,7 @@ def create_world_router(database: Database, settings: Settings) -> APIRouter:
                 graph.completed_at = datetime.now(UTC)
                 graph.error_code = graph.error_message = None
                 session.commit()
-                _enqueue_node_investigation(JobService(session), project_id=project_id)
+                enqueue_node_investigation(JobService(session), project_id=project_id)
             else:
                 session.commit()
         else:

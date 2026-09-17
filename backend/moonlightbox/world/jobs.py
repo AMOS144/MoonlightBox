@@ -49,6 +49,7 @@ from moonlightbox.world.models import (
     WorldGraphVersion,
 )
 from moonlightbox.world.person_world import PersonWorldAgent
+from moonlightbox.world.profile_store import persist_profile
 
 WORLD_BUILD_JOB_KIND = "lightrag_world_build_v1"
 WORLD_BUNDLE_VERSION = "conversation-bundle-v1"
@@ -222,7 +223,7 @@ def create_world_build_handler(
                 proposal.review_note = "重新生成别名候选，旧提案作废。"
                 proposal.reviewed_at = datetime.now(UTC)
         if graph.status == "ready" and not force_recompile and not start_alias_review:
-            analysis_job = _enqueue_node_investigation(
+            analysis_job = enqueue_node_investigation(
                 service,
                 project_id=project_id,
             )
@@ -252,8 +253,8 @@ def create_world_build_handler(
                     "world_source_changed",
                     "人物世界任务对应的消息集合已变化，请使用最新导入重新构建",
                 )
-            subject = _required_participant(messages, role="target")
-            user = _required_participant(messages, role="self")
+            subject = required_participant(messages, role="target")
+            user = required_participant(messages, role="self")
             quoted_sender_observations = preprocess_quoted_senders(messages)
             persist_quoted_sender_aliases(
                 service.session,
@@ -422,7 +423,7 @@ def create_world_build_handler(
                         original_messages=message_evidence,
                     )
                     with service.session.begin_nested():
-                        _persist_merge_proposals(
+                        persist_merge_proposals(
                             service.session,
                             project_id=project_id,
                             graph=graph,
@@ -470,7 +471,7 @@ def create_world_build_handler(
                 graph.error_code = None
                 graph.error_message = None
                 service.session.commit()
-                analysis_job = _enqueue_node_investigation(service, project_id=project_id)
+                analysis_job = enqueue_node_investigation(service, project_id=project_id)
                 service.checkpoint(
                     job.id,
                     {
@@ -516,7 +517,7 @@ def create_world_build_handler(
                 source_message_ids=agent_result.source_message_ids,
                 retrieval_manifest=agent_result.retrieval_manifest,
             )
-            profile = _persist_profile(
+            profile = persist_profile(
                 service.session,
                 graph=graph,
                 subject_person_id=subject.participant_id,
@@ -570,7 +571,7 @@ def create_world_build_handler(
     return handler
 
 
-def _persist_merge_proposals(
+def persist_merge_proposals(
     session: Session,
     *,
     project_id: str,
@@ -642,7 +643,7 @@ def load_world_messages(
     ]
 
 
-def _required_participant(messages: list[WorldMessage], *, role: str) -> WorldMessage:
+def required_participant(messages: list[WorldMessage], *, role: str) -> WorldMessage:
     candidates = [item for item in messages if item.participant_role == role]
     if not candidates:
         raise JobHandlerError("world_participant_missing", f"聊天中缺少 {role} 角色")
@@ -743,74 +744,7 @@ def _apply_metadata(graph: WorldGraphVersion, metadata: LightRAGMetadata) -> Non
     graph.entity_prompt_version = metadata.entity_prompt_version
 
 
-def _persist_profile(
-    session: Session,
-    *,
-    graph: WorldGraphVersion,
-    subject_person_id: str,
-    compiled: CompiledWorldProfile,
-    agent_run_id: str | None = None,
-    generation_summary: dict[str, object] | None = None,
-    profile_v2: dict[str, object] | None = None,
-    profile_v3: dict[str, object] | None = None,
-    profile_schema_version: str = "v1",
-    investigation_report: dict[str, object] | None = None,
-) -> PersonWorldProfile:
-    node_hash = ((generation_summary or {}).get("node_scope") or {}).get("preview_hash")
-    existing = session.scalar(
-        select(PersonWorldProfile).where(
-            PersonWorldProfile.node_boundary_hash == node_hash,
-            PersonWorldProfile.graph_version_id == graph.id,
-            *([PersonWorldProfile.agent_run_id == agent_run_id] if node_hash else []),
-        )
-    )
-    draft = compiled.draft.model_dump(mode="json")
-    values = {
-        "node_boundary_hash": node_hash,
-        "identity": draft["identity"],
-        "work_and_education": draft["work_and_education"],
-        "places": draft["places"],
-        "social_relationships": draft["social_relationships"],
-        "preferences": draft["preferences"],
-        "recurring_activities": draft["recurring_activities"],
-        "routine_summary": draft["routine_summary"],
-        "life_phases": draft["life_phases"],
-        "relationship_with_user": draft["relationship_with_user"],
-        "important_events": draft["important_events"],
-        "unresolved_candidates": draft["unresolved_candidates"],
-        "source_message_ids": list(compiled.source_message_ids),
-        "retrieval_manifest": [
-            {
-                "question": item.question,
-                "mode": item.mode,
-                "document_ids": list(item.document_ids),
-            }
-            for item in compiled.retrieval_manifest
-        ],
-        "compiler_version": COMPILER_VERSION,
-        "agent_run_id": agent_run_id,
-        "generation_summary": generation_summary or {},
-        "profile_v2": profile_v2 or {},
-        "profile_v3": profile_v3 or {},
-        "profile_schema_version": profile_schema_version,
-        "investigation_report": investigation_report or {},
-    }
-    if existing is None:
-        existing = PersonWorldProfile(
-            project_id=graph.project_id,
-            subject_person_id=subject_person_id,
-            graph_version_id=graph.id,
-            **values,
-        )
-        session.add(existing)
-    else:
-        for key, value in values.items():
-            setattr(existing, key, value)
-    session.flush()
-    return existing
-
-
-def _enqueue_node_investigation(
+def enqueue_node_investigation(
     service: JobService,
     *,
     project_id: str,
