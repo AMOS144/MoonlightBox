@@ -15,8 +15,8 @@ from moonlightbox.runtime_v1.agent_support import (
     prompt_hash,
 )
 from moonlightbox.runtime_v1.director import DirectorAgent
-from moonlightbox.runtime_v1.executor import _seed_world_memory
 from moonlightbox.runtime_v1.plan_context import DayPlanContext
+from moonlightbox.runtime_v1.profile_projection import _seed_world_memory
 from moonlightbox.runtime_v1.schemas import (
     ContextPacket,
     DayPlanProposal,

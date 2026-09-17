@@ -364,7 +364,7 @@ class PeftLmAdapter:
             else:
                 stale += 1
             if not config.preserve_checkpoints and best is not None:
-                _prune_adapter_checkpoints(config.adapter_dir, keep=best.checkpoint)
+                prune_adapter_checkpoints(config.adapter_dir, keep=best.checkpoint)
             if config.early_stopping_patience > 0 and stale >= config.early_stopping_patience:
                 stopped_iteration = iteration
                 break
@@ -630,7 +630,7 @@ def _to_device(row: dict[str, Any], device: Any) -> dict[str, Any]:
     return {key: value.to(device) for key, value in row.items()}
 
 
-def _prune_adapter_checkpoints(directory: Path, *, keep: Path) -> None:
+def prune_adapter_checkpoints(directory: Path, *, keep: Path) -> None:
     for checkpoint in directory.glob("[0-9]" * 7 + "_adapter_model.safetensors"):
         if checkpoint.resolve() != keep.resolve():
             checkpoint.unlink()

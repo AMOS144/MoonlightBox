@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from moonlightbox.runtime_v1.executor import (
+from moonlightbox.runtime_v1.profile_projection import (
     _profile_payload,
     _profile_statements,
     _runtime_routine_profile,

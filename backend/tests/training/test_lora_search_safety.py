@@ -7,7 +7,10 @@ from moonlightbox.training.peft_adapter import default_lora_candidates
 
 
 def test_search_output_lock_is_exclusive_and_records_owner(tmp_path: Path) -> None:
-    from moonlightbox.training.jobs import SearchLockTimeout, SearchOutputLock
+    from moonlightbox.training.search.lock import (
+        SearchLockTimeout,
+        SearchOutputLock,
+    )
 
     output_dir = tmp_path / "search"
     with SearchOutputLock(output_dir, timeout_seconds=0.1) as owner:
@@ -19,7 +22,10 @@ def test_search_output_lock_is_exclusive_and_records_owner(tmp_path: Path) -> No
 
 
 def test_state_store_rejects_stale_fencing_generation(tmp_path: Path) -> None:
-    from moonlightbox.training.jobs import FencingTokenError, SearchStateStore
+    from moonlightbox.training.search.lock import (
+        FencingTokenError,
+        SearchStateStore,
+    )
 
     path = tmp_path / "search-state.json"
     current = SearchStateStore(path, run_generation="generation-new")
@@ -31,7 +37,7 @@ def test_state_store_rejects_stale_fencing_generation(tmp_path: Path) -> None:
 
 
 def test_candidate_id_rejects_path_traversal(tmp_path: Path) -> None:
-    from moonlightbox.training.jobs import run_lora_candidate_search
+    from moonlightbox.training.search.runner import run_lora_candidate_search
 
     candidate = replace(default_lora_candidates()[0], candidate_id="../escape")
 
@@ -52,7 +58,7 @@ def test_candidate_id_rejects_path_traversal(tmp_path: Path) -> None:
 
 
 def test_duplicate_candidate_ids_are_rejected_before_search(tmp_path: Path) -> None:
-    from moonlightbox.training.jobs import run_lora_candidate_search
+    from moonlightbox.training.search.runner import run_lora_candidate_search
 
     first = default_lora_candidates()[0]
     duplicate = replace(
@@ -77,7 +83,7 @@ def test_duplicate_candidate_ids_are_rejected_before_search(tmp_path: Path) -> N
 
 
 def test_local_model_digest_cache_reuses_and_invalidates_hashes(tmp_path: Path) -> None:
-    from moonlightbox.training.jobs import build_local_model_identity
+    from moonlightbox.training.model_identity import build_local_model_identity
 
     model_dir = tmp_path / "model"
     model_dir.mkdir()
@@ -117,7 +123,7 @@ def test_local_model_digest_cache_reuses_and_invalidates_hashes(tmp_path: Path) 
 def test_digest_cache_invalidates_same_size_rewrite_with_restored_mtime(
     tmp_path: Path,
 ) -> None:
-    from moonlightbox.training.jobs import build_local_model_identity
+    from moonlightbox.training.model_identity import build_local_model_identity
 
     model_dir = tmp_path / "model"
     model_dir.mkdir()
@@ -152,7 +158,7 @@ def test_digest_cache_invalidates_same_size_rewrite_with_restored_mtime(
 def test_unexpected_candidate_error_aborts_instead_of_being_isolated(
     tmp_path: Path,
 ) -> None:
-    from moonlightbox.training.jobs import run_lora_candidate_search
+    from moonlightbox.training.search.runner import run_lora_candidate_search
     from test_lora_candidate_search import SearchFakeAdapter, _training_paths
 
     class BrokenAdapter(SearchFakeAdapter):
@@ -179,7 +185,7 @@ def test_unexpected_candidate_error_aborts_instead_of_being_isolated(
 def test_tampered_successful_candidate_is_quarantined_and_retrained(
     tmp_path: Path,
 ) -> None:
-    from moonlightbox.training.jobs import run_lora_candidate_search
+    from moonlightbox.training.search.runner import run_lora_candidate_search
     from test_lora_candidate_search import SearchFakeAdapter, _training_paths
 
     model_dir, data_dir = _training_paths(tmp_path)
@@ -228,7 +234,7 @@ def test_tampered_successful_candidate_is_quarantined_and_retrained(
 
 
 def test_tampered_final_adapter_retrains_after_bounded_cleanup(tmp_path: Path) -> None:
-    from moonlightbox.training.jobs import run_lora_candidate_search
+    from moonlightbox.training.search.runner import run_lora_candidate_search
     from test_lora_candidate_search import SearchFakeAdapter, _training_paths
 
     model_dir, data_dir = _training_paths(tmp_path)
@@ -272,7 +278,7 @@ def test_tampered_final_adapter_retrains_after_bounded_cleanup(tmp_path: Path) -
 
 
 def test_full_training_progress_uses_streamed_iteration() -> None:
-    from moonlightbox.training.jobs import _search_job_progress
+    from moonlightbox.training.search.state import _search_job_progress
 
     state = {
         "stage": "full_training",

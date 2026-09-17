@@ -164,7 +164,7 @@ def _training_paths(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def test_search_runs_candidates_serially_and_full_trains_best(tmp_path: Path) -> None:
-    from moonlightbox.training.jobs import run_lora_candidate_search
+    from moonlightbox.training.search.runner import run_lora_candidate_search
 
     model_dir, data_dir = _training_paths(tmp_path)
     adapter = SearchFakeAdapter(
@@ -238,7 +238,7 @@ def test_search_runs_candidates_serially_and_full_trains_best(tmp_path: Path) ->
 def test_selected_checkpoint_is_independently_revalidated_before_publish(
     tmp_path: Path,
 ) -> None:
-    from moonlightbox.training.jobs import run_lora_candidate_search
+    from moonlightbox.training.search.runner import run_lora_candidate_search
 
     model_dir, data_dir = _training_paths(tmp_path)
     adapter = SearchFakeAdapter(
@@ -273,7 +273,7 @@ def test_selected_checkpoint_is_independently_revalidated_before_publish(
 def test_full_run_selects_semantically_valid_checkpoint_by_held_out_style(
     tmp_path: Path,
 ) -> None:
-    from moonlightbox.training.jobs import run_lora_candidate_search
+    from moonlightbox.training.search.runner import run_lora_candidate_search
 
     model_dir, data_dir = _training_paths(tmp_path)
     adapter = SearchFakeAdapter(
@@ -337,10 +337,8 @@ def test_full_run_selects_semantically_valid_checkpoint_by_held_out_style(
 def test_search_resumes_completed_candidates_and_rejects_fingerprint_change(
     tmp_path: Path,
 ) -> None:
-    from moonlightbox.training.jobs import (
-        TrainingFingerprintMismatch,
-        run_lora_candidate_search,
-    )
+    from moonlightbox.training.search.lock import TrainingFingerprintMismatch
+    from moonlightbox.training.search.runner import run_lora_candidate_search
 
     model_dir, data_dir = _training_paths(tmp_path)
     output_dir = tmp_path / "search"
@@ -398,7 +396,7 @@ def test_search_resumes_completed_candidates_and_rejects_fingerprint_change(
 def test_search_reuses_valid_final_adapter_after_candidate_artifacts_are_pruned(
     tmp_path: Path,
 ) -> None:
-    from moonlightbox.training.jobs import run_lora_candidate_search
+    from moonlightbox.training.search.runner import run_lora_candidate_search
 
     model_dir, data_dir = _training_paths(tmp_path)
     output_dir = tmp_path / "search"
@@ -432,10 +430,8 @@ def test_search_reuses_valid_final_adapter_after_candidate_artifacts_are_pruned(
 def test_search_continues_after_one_failure_but_fails_when_all_candidates_fail(
     tmp_path: Path,
 ) -> None:
-    from moonlightbox.training.jobs import (
-        AllCandidatesFailedError,
-        run_lora_candidate_search,
-    )
+    from moonlightbox.training.search.lock import AllCandidatesFailedError
+    from moonlightbox.training.search.runner import run_lora_candidate_search
 
     model_dir, data_dir = _training_paths(tmp_path)
     partial = SearchFakeAdapter(
@@ -481,10 +477,8 @@ def test_search_continues_after_one_failure_but_fails_when_all_candidates_fail(
 
 
 def test_resume_rejects_same_size_weight_and_train_data_changes(tmp_path: Path) -> None:
-    from moonlightbox.training.jobs import (
-        TrainingFingerprintMismatch,
-        run_lora_candidate_search,
-    )
+    from moonlightbox.training.search.lock import TrainingFingerprintMismatch
+    from moonlightbox.training.search.runner import run_lora_candidate_search
 
     model_dir, data_dir = _training_paths(tmp_path)
     common = {
@@ -523,11 +517,9 @@ def test_resume_rejects_same_size_weight_and_train_data_changes(tmp_path: Path) 
 def test_resume_rejects_actual_yaml_configuration_change(tmp_path: Path) -> None:
     from dataclasses import replace
 
-    from moonlightbox.training.jobs import (
-        TrainingFingerprintMismatch,
-        run_lora_candidate_search,
-    )
     from moonlightbox.training.peft_adapter import default_lora_candidates
+    from moonlightbox.training.search.lock import TrainingFingerprintMismatch
+    from moonlightbox.training.search.runner import run_lora_candidate_search
 
     model_dir, data_dir = _training_paths(tmp_path)
     candidates = default_lora_candidates()
@@ -561,7 +553,7 @@ def test_resume_rejects_actual_yaml_configuration_change(tmp_path: Path) -> None
 def test_interrupted_full_run_restarts_clean_without_claiming_optimizer_resume(
     tmp_path: Path,
 ) -> None:
-    from moonlightbox.training.jobs import run_lora_candidate_search
+    from moonlightbox.training.search.runner import run_lora_candidate_search
 
     model_dir, data_dir = _training_paths(tmp_path)
     common = {
@@ -612,7 +604,7 @@ def test_resume_reuses_terminal_saved_full_checkpoint_after_worker_exit(
 ) -> None:
     """最后权重已保存时，恢复只补 valid 审计，不得重新训练完整 epoch。"""
 
-    from moonlightbox.training.jobs import run_lora_candidate_search
+    from moonlightbox.training.search.runner import run_lora_candidate_search
 
     model_dir, data_dir = _training_paths(tmp_path)
     output_dir = tmp_path / "search"
@@ -670,8 +662,8 @@ def test_resume_reuses_terminal_saved_full_checkpoint_after_worker_exit(
 
 
 def test_migrates_only_legacy_checkpoint_preservation_fingerprint(tmp_path: Path) -> None:
-    from moonlightbox.training.jobs import (
-        _canonical_digest,
+    from moonlightbox.training.model_identity import _canonical_digest
+    from moonlightbox.training.search.state import (
         _migrate_legacy_full_checkpoint_preservation_fingerprint,
     )
 
@@ -731,7 +723,7 @@ def test_migrates_only_legacy_checkpoint_preservation_fingerprint(tmp_path: Path
 
 
 def test_checkpoint_style_selection_resumes_from_persisted_audits(tmp_path: Path) -> None:
-    from moonlightbox.training.jobs import _select_full_checkpoint_by_style
+    from moonlightbox.training.search.runner import _select_full_checkpoint_by_style
 
     full_dir = tmp_path / "full"
     full_dir.mkdir()
@@ -799,7 +791,7 @@ def test_checkpoint_style_selection_resumes_from_persisted_audits(tmp_path: Path
 
 
 def test_training_metadata_records_environment_and_file_digests(tmp_path: Path) -> None:
-    from moonlightbox.training.jobs import run_lora_candidate_search
+    from moonlightbox.training.search.runner import run_lora_candidate_search
 
     model_dir, data_dir = _training_paths(tmp_path)
     adapter = SearchFakeAdapter(
@@ -840,10 +832,8 @@ def test_training_metadata_records_environment_and_file_digests(tmp_path: Path) 
 
 
 def test_unpinned_remote_model_identifier_fails_closed(tmp_path: Path) -> None:
-    from moonlightbox.training.jobs import (
-        TrainingFingerprintMismatch,
-        run_lora_candidate_search,
-    )
+    from moonlightbox.training.search.lock import TrainingFingerprintMismatch
+    from moonlightbox.training.search.runner import run_lora_candidate_search
 
     _model_dir, data_dir = _training_paths(tmp_path)
     adapter = SearchFakeAdapter({})
@@ -866,7 +856,7 @@ def test_unpinned_remote_model_identifier_fails_closed(tmp_path: Path) -> None:
 def test_candidate_ranking_ignores_unpublishable_iter_one_baseline(
     tmp_path: Path,
 ) -> None:
-    from moonlightbox.training.jobs import run_lora_candidate_search
+    from moonlightbox.training.search.runner import run_lora_candidate_search
 
     model_dir, data_dir = _training_paths(tmp_path)
     adapter = SearchFakeAdapter(
@@ -899,7 +889,7 @@ def test_candidate_ranking_ignores_unpublishable_iter_one_baseline(
 
 
 def test_candidate_ranking_requires_semantic_pass_before_style_and_loss() -> None:
-    from moonlightbox.training.jobs import _candidate_sort_key
+    from moonlightbox.training.search.runner import _candidate_sort_key
 
     semantic_failure = {
         "candidate_id": "broken",
@@ -930,10 +920,8 @@ def test_candidate_ranking_requires_semantic_pass_before_style_and_loss() -> Non
 
 
 def test_candidate_ranking_rejects_all_semantic_failures(tmp_path: Path) -> None:
-    from moonlightbox.training.jobs import (
-        AllCandidatesFailedError,
-        run_lora_candidate_search,
-    )
+    from moonlightbox.training.search.lock import AllCandidatesFailedError
+    from moonlightbox.training.search.runner import run_lora_candidate_search
 
     model_dir, data_dir = _training_paths(tmp_path)
     adapter = SearchFakeAdapter(
@@ -967,8 +955,8 @@ def test_explicit_single_candidate_fallback_only_selects_by_validation_loss(
     tmp_path: Path,
 ) -> None:
     """受限设备的唯一候选可进入全量训练，但不会把短跑当作发布验收。"""
-    from moonlightbox.training.jobs import run_lora_candidate_search
     from moonlightbox.training.peft_adapter import default_lora_candidates
+    from moonlightbox.training.search.runner import run_lora_candidate_search
 
     model_dir, data_dir = _training_paths(tmp_path)
     candidate = default_lora_candidates()[0]

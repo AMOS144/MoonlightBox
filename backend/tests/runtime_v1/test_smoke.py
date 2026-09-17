@@ -335,7 +335,7 @@ def test_memory_search_hides_non_auditable_legacy_source_labels(tmp_path) -> Non
 
 def test_branch_anchor_uses_selected_node_start_time(tmp_path) -> None:
     """批准边界决定初始钟点，不再从旧事件或训练产物读取时间。"""
-    from moonlightbox.runtime_v1.executor import _runtime_time_anchor
+    from moonlightbox.runtime_v1.profile_projection import _runtime_time_anchor
 
     database = Database(f"sqlite:///{tmp_path / 'branch-anchor.db'}")
     Base.metadata.create_all(database.engine)

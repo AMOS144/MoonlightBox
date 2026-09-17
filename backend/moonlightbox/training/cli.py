@@ -19,6 +19,12 @@ from moonlightbox.events.models import AnalysisRevision, AnalysisRun, EventNode
 from moonlightbox.imports.models import Message, Participant
 from moonlightbox.imports.types import ImportedMessage, MessageKind
 from moonlightbox.jobs.models import Job
+from moonlightbox.training.acceptance import (
+    acceptance_score,
+    event_context,
+    model_gate_snapshot,
+    same_timeline,
+)
 from moonlightbox.training.acceptance_retry import (
     resolve_reply_protocol,
     retry_acceptance_only,
@@ -29,13 +35,7 @@ from moonlightbox.training.conversation_action_policy import (
 )
 from moonlightbox.training.dataset_builder import ConfirmedEventContext, DatasetBuilder
 from moonlightbox.training.expression_policy import build_expression_policy
-from moonlightbox.training.jobs import (
-    DigitalHumanTrainingConfig,
-    _acceptance_score,
-    _event_context,
-    _model_gate_snapshot,
-    _same_timeline,
-)
+from moonlightbox.training.jobs import DigitalHumanTrainingConfig
 from moonlightbox.training.media_behavior_policy import build_media_behavior_policy
 from moonlightbox.training.model_acceptance import (
     LocalAcceptanceReviewer,
@@ -44,7 +44,7 @@ from moonlightbox.training.model_acceptance import (
     evaluate_activation_gates,
 )
 from moonlightbox.training.models import ModelVersion, TimelineConfirmation
-from moonlightbox.training.peft_adapter import _prune_adapter_checkpoints
+from moonlightbox.training.peft_adapter import prune_adapter_checkpoints
 from moonlightbox.training.peft_generation import PeftPathReplyGenerator
 from moonlightbox.training.sticker_policy import (
     build_sticker_evaluation_cases_from_database,
@@ -138,14 +138,14 @@ def backfill_behavior_policies(
         raise RuntimeError("模型训练清单缺少 train 时间边界")
     policy_cutoff = datetime.fromisoformat(train_end_value)
     policy_messages = [
-        item for item in imported if _same_timeline(item.timestamp, policy_cutoff) <= policy_cutoff
+        item for item in imported if same_timeline(item.timestamp, policy_cutoff) <= policy_cutoff
     ]
     if not policy_messages:
         raise RuntimeError("train 时间边界内没有行为策略样本")
     kernel_examples = [
         item
         for item in examples
-        if item.kind == "chat" and _same_timeline(item.target_at, policy_cutoff) <= policy_cutoff
+        if item.kind == "chat" and same_timeline(item.target_at, policy_cutoff) <= policy_cutoff
     ]
     rhythm = (
         EvidenceBackedIdentityKernelBuilder(
@@ -427,7 +427,7 @@ def audit_acceptance_checkpoint(
     )
     examples = builder.build(imported, target_sender=target.name, cutoff=cutoff)
     event_contexts = [
-        _event_context(snapshot) for snapshot in confirmation.event_revision_snapshots
+        event_context(snapshot) for snapshot in confirmation.event_revision_snapshots
     ]
     examples = builder.augment_with_events(examples, event_contexts)
     examples.extend(builder.grounding_policy_examples(persona=target.name, cutoff=cutoff))
@@ -533,13 +533,13 @@ def audit_acceptance_checkpoint(
             reply_protocol=resolve_reply_protocol(active_model.training_config),
         )
     gate = evaluate_activation_gates(
-        _model_gate_snapshot(f"checkpoint:{candidate_dir.name}", report, style_metrics),
-        _model_gate_snapshot("base", base_report, base_style),
-        _model_gate_snapshot(active_model_id, active_report, active_style),
+        model_gate_snapshot(f"checkpoint:{candidate_dir.name}", report, style_metrics),
+        model_gate_snapshot("base", base_report, base_style),
+        model_gate_snapshot(active_model_id, active_report, active_style),
     )
-    candidate_score = _acceptance_score(report)
-    base_score = _acceptance_score(base_report)
-    active_score = _acceptance_score(active_report)
+    candidate_score = acceptance_score(report)
+    base_score = acceptance_score(base_report)
+    active_score = acceptance_score(active_report)
     passed = (
         report.passed
         and candidate_score >= base_score
@@ -825,7 +825,7 @@ def cleanup_failed_training(
             best = Path(str(value.get("best_checkpoint", "")))
             adapter_dir = Path(str(value.get("adapter_dir", "")))
             if best.is_file() and adapter_dir.is_dir():
-                _prune_adapter_checkpoints(adapter_dir, keep=best)
+                prune_adapter_checkpoints(adapter_dir, keep=best)
     full_dir = root / "full"
     if full_dir.exists():
         shutil.rmtree(full_dir)

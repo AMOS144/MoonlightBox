@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
-from moonlightbox.runtime_v1.executor import _runtime_time_anchor
+from moonlightbox.runtime_v1.profile_projection import _runtime_time_anchor
 from moonlightbox.runtime_v1.router import RuntimeBranchCreate
 from moonlightbox.runtime_v1.service import RuntimeService
 from pydantic import ValidationError
