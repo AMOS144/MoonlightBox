@@ -100,12 +100,12 @@ export function NodeProfile({ projectId, profileId, onRefresh }: { projectId: st
               <Group gap="xs">
                 <Button color="green" disabled={locked || data.failed_sections.length > 0} loading={start.isPending}
                   onClick={() => start.mutate()}>开始对话</Button>
-                <Tooltip label={opened ? '收起对话框' : '展开对话框'}>
-                  <ActionIcon variant="subtle" color="gray" size="lg" aria-label={opened ? '收起对话框' : '展开对话框'}
-                    onClick={() => setOpenedPreference(!opened)}>
-                    <Icon name={opened ? 'panel-collapse' : 'panel-expand'} size={18} />
+                {!opened && <Tooltip label="展开对话框">
+                  <ActionIcon variant="subtle" color="gray" size="lg" aria-label="展开对话框"
+                    onClick={() => setOpenedPreference(true)}>
+                    <Icon name="panel-expand" size={18} />
                   </ActionIcon>
-                </Tooltip>
+                </Tooltip>}
               </Group>
             </Group>
             {data.failed_sections.length > 0 && <Alert color="orange" title="部分栏目需要恢复">

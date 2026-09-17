@@ -16,6 +16,7 @@ const list = (v: unknown): unknown[] => Array.isArray(v) ? v : []
 const text = (v: unknown) => typeof v === 'string' ? v : ''
 const states: Record<string, string> = { described: '已生成', unknown: '尚不了解', not_applicable: '当前不适用', current: '当前', planned: '计划中', past: '过去', paused: '暂停' }
 const values: Record<string, string> = { low: '偏低', moderate: '中等', high: '偏高', mixed: '因情境而异', unknown: '尚不了解', supported: '得到满足', frustrated: '受到限制' }
+const enumColors: Record<string, string> = { low: 'gray', moderate: 'blue', high: 'orange', mixed: 'violet', unknown: 'gray', supported: 'teal', frustrated: 'red' }
 
 export function V3ProfileGrid({ projectId, profile, locked, selectedKeys, onToggle, onToggleMany, editing = false }: {
   projectId: string; profile: Obj; locked: boolean; selectedKeys: Set<string>;
@@ -41,16 +42,29 @@ export function V3ProfileGrid({ projectId, profile, locked, selectedKeys, onTogg
   function selectable(section: string, name: string, item: Obj, path: string, moduleId?: string) {
     const sel = makeSelection(section, name, item, path, moduleId)
     const key = sel.key
-    const body = text(item.description) || text(item.summary) || text(item.value)
+    const rawValue = text(item.value)
+    const enumLabel = values[rawValue]
+    const isEnum = Boolean(rawValue && enumLabel)
+    const description = text(item.description) || text(item.summary)
+    // 短字段（一行说得清的属性）收成"名称: 值"的行内形式，不再另起正文段落。
+    const compact = !isEnum && !rawValue && Boolean(description) && description.length <= 80 && !description.includes('\n')
+      && !list(item.patterns).length && !text(item.context) && !text(item.roleplay_guidance)
     const selection = <Button size="compact-xs" variant={selectedKeys.has(key) ? 'filled' : 'subtle'} disabled={locked} aria-label={`${selectedKeys.has(key) ? '取消选择' : '选择'}${name}`} onClick={() => onToggle(sel)}>{selectedKeys.has(key) ? '已选' : '选择'}</Button>
     return <Stack key={key} gap={4} mb="sm">
-      <Group justify="space-between" gap="xs"><Text fw={500} size="sm">{name}</Text><Group gap={4}>
-        {item.status && item.status !== 'described' ? <Badge size="xs" variant="light">{states[text(item.status)] ?? text(item.status)}</Badge> : null}
-        {item.basis === 'inferred' ? <Text size="xs" c="dimmed">推断</Text> : item.basis === 'user_corrected' ? <Text size="xs" c="teal">已纠正</Text> : null}
-        {editing && selection}
-      </Group></Group>
-      {item.value && text(item.value) !== body ? <Text size="sm">{values[text(item.value)] ?? text(item.value)}</Text> : null}
-      <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>{body || '尚未形成判断'}</Text>
+      <Group justify="space-between" gap="xs" wrap="nowrap">
+        <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+          <Text fw={500} size="sm" style={{ flexShrink: 0 }}>{name}</Text>
+          {compact ? <Text size="sm" truncate>{description}</Text> : null}
+        </Group>
+        <Group gap={4} wrap="nowrap">
+          {item.status && item.status !== 'described' ? <Badge size="xs" variant="light">{states[text(item.status)] ?? text(item.status)}</Badge> : null}
+          {item.basis === 'inferred' ? <Text size="xs" c="dimmed">推断</Text> : item.basis === 'user_corrected' ? <Text size="xs" c="teal">已纠正</Text> : null}
+          {editing && selection}
+        </Group>
+      </Group>
+      {isEnum ? <div><Badge variant="light" color={enumColors[rawValue] ?? 'gray'}>{enumLabel}</Badge></div> : null}
+      {!isEnum && rawValue && rawValue !== description ? <Text size="sm" fw={600}>{rawValue}</Text> : null}
+      {!compact && (description || !rawValue) ? <Text size={isEnum ? 'xs' : 'sm'} c={isEnum ? 'dimmed' : undefined} style={{ whiteSpace: 'pre-wrap' }}>{description || '尚未形成判断'}</Text> : null}
       {list(item.patterns).map((raw, index) => { const pattern = obj(raw); return <Stack key={index} gap={2} pl="sm">
         <Text size="sm" fw={500}>{text(pattern.form)}</Text>
         <Text size="xs">怎么用、何时用：{text(pattern.use_when) || '尚未说明'}</Text>
