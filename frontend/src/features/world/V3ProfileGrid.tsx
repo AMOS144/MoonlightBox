@@ -1,6 +1,7 @@
-import { Accordion, Badge, Button, Card, Group, Stack, Text, Title } from '@mantine/core'
+import { Accordion, ActionIcon, Badge, Button, Card, Group, Stack, Text, Title, Tooltip } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
 import { request } from '../../api/client'
+import { Icon } from '../../components/Icon'
 import type { ProfileStatementSelection } from './types'
 
 type Obj = Record<string, unknown>
@@ -49,7 +50,15 @@ export function V3ProfileGrid({ projectId, profile, locked, selectedKeys, onTogg
     // 短字段（一行说得清的属性）收成"名称: 值"的行内形式，不再另起正文段落。
     const compact = !isEnum && !rawValue && Boolean(description) && description.length <= 80 && !description.includes('\n')
       && !list(item.patterns).length && !text(item.context) && !text(item.roleplay_guidance)
-    const selection = <Button size="compact-xs" variant={selectedKeys.has(key) ? 'filled' : 'subtle'} disabled={locked} aria-label={`${selectedKeys.has(key) ? '取消选择' : '选择'}${name}`} onClick={() => onToggle(sel)}>{selectedKeys.has(key) ? '已选' : '选择'}</Button>
+    const chosen = selectedKeys.has(key)
+    const selection = (
+      <Tooltip label={chosen ? '取消选择' : '选择'}>
+        <ActionIcon variant="subtle" color={chosen ? 'teal' : 'gray'} size="sm" radius="xl"
+          disabled={locked} aria-label={`${chosen ? '取消选择' : '选择'}${name}`} onClick={() => onToggle(sel)}>
+          <Icon name={chosen ? 'selected' : 'select'} size={16} />
+        </ActionIcon>
+      </Tooltip>
+    )
     return <Stack key={key} gap={4} mb="sm">
       <Group justify="space-between" gap="xs" wrap="nowrap">
         <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
@@ -58,7 +67,7 @@ export function V3ProfileGrid({ projectId, profile, locked, selectedKeys, onTogg
         </Group>
         <Group gap={4} wrap="nowrap">
           {item.status && item.status !== 'described' ? <Badge size="xs" variant="light">{states[text(item.status)] ?? text(item.status)}</Badge> : null}
-          {item.basis === 'inferred' ? <Text size="xs" c="dimmed">推断</Text> : item.basis === 'user_corrected' ? <Text size="xs" c="teal">已纠正</Text> : null}
+          {item.basis === 'user_corrected' ? <Text size="xs" c="teal">已纠正</Text> : null}
           {editing && selection}
         </Group>
       </Group>

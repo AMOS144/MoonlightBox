@@ -10,6 +10,8 @@ import {
   IconGitBranch,
   IconHome,
   IconMessageCircle,
+  IconCircle,
+  IconCircleCheckFilled,
   IconLayoutSidebarRightCollapse,
   IconLayoutSidebarRightExpand,
   IconPackage,
@@ -42,6 +44,7 @@ export type IconName =
   | 'play'
   | 'plus'
   | 'send'
+  | 'select' | 'selected'
   | 'timeline'
 
 type Props = {
@@ -77,5 +80,7 @@ const icons: Record<IconName, TablerIcon> = {
   play: IconPlayerPlay,
   plus: IconPlus,
   send: IconSend,
+  select: IconCircle,
+  selected: IconCircleCheckFilled,
   timeline: IconTimeline,
 }
